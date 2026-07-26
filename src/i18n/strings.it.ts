@@ -260,4 +260,9 @@ export const it: Record<StringKey, string> = {
   // giuridica — una sola frase che nomina la condizione.
   'consent.note':
     "Con l'avvio confermi: tutti i partecipanti sono al corrente della registrazione e sono d'accordo.",
+
+  // --- Vista telefono (`MobileView.tsx`) — vedi il commento in `en`. --------
+  'mobile.runsOnDesktopLabel': 'Da aprire sul computer',
+  'mobile.runsOnDesktopBody':
+    'La trascrizione viene calcolata sul tuo dispositivo, e per questo serve un computer con Chrome o Edge. Il modello si scarica lì una volta sola, circa 1,5 GB, poi tutto funziona offline.',
 };

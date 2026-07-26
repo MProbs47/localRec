@@ -24,6 +24,7 @@ import '@fontsource/jetbrains-mono/latin-ext-400.css';
 import '@fontsource/jetbrains-mono/latin-500.css';
 import '@fontsource/jetbrains-mono/latin-ext-500.css';
 import App from './App';
+import { MobileView } from './ui/MobileView';
 import { getLocale, resolveLocale, setLocale, subscribeLocale } from './i18n';
 import { readStoredLocale } from './i18n/localeStorage';
 
@@ -54,8 +55,35 @@ if (!rootElement) {
   throw new Error('#root element missing from index.html');
 }
 
+/**
+ * Telefon oder Arbeitsgerät? Der Entscheid fällt genau einmal, hier, vor dem
+ * ersten Render — und trennt die zwei Ansichten vollständig: `MobileView` ist
+ * eine Leseseite ohne Interaktion, `App` das Gerät. Ein Telefon bekommt damit
+ * auch keinen Worker, kein OPFS und keine Mikrofon-Anfrage: `App` wird dort
+ * nicht einmal gemountet.
+ *
+ * Zwei Signale, beide feature-detection am Aufrufort (KTD7), kein
+ * User-Agent-Sniffing und kein Schalter:
+ *   - `pointer: coarse` — ein Finger, keine Maus.
+ *   - die KÜRZERE Bildschirmkante ≤ 560px. Absichtlich `min(w, h)` und nicht
+ *     `max-width`: ein gedrehtes Telefon ist 844px breit und würde sonst
+ *     mitten in der Sitzung auf die Geräteansicht springen. So ist der
+ *     Entscheid drehungsfest, ohne dass jemand auf `resize` hören muss.
+ * Ein Tablet (kürzere Kante ~768px) und ein Touch-Notebook fallen damit auf
+ * die Geräteansicht, wo sie hingehören.
+ *
+ * `matchMedia` statt einer `or`-Mediaquery: `((A) or (B))` ist Media Queries
+ * Level 4 und liefert auf älteren Safaris still `matches: false` — genau dort,
+ * wo die Weiche am nötigsten ist. Zwei einfache Abfragen können das nicht.
+ *
+ * Kein Ausweg vom Telefon in die App (Owner-Entscheid: keine Interaktion). Wer
+ * es trotzdem versuchen will, nimmt „Desktop-Website" im Browsermenü — das
+ * verstellt `pointer`/Breite und landet in `App`.
+ */
+const isPhone =
+  window.matchMedia('(pointer: coarse)').matches &&
+  Math.min(window.innerWidth, window.innerHeight) <= 560;
+
 createRoot(rootElement).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+  <StrictMode>{isPhone ? <MobileView /> : <App />}</StrictMode>,
 );

@@ -263,4 +263,9 @@ export const es: Record<StringKey, string> = {
   // fórmula jurídica — una sola frase que nombra la condición.
   'consent.note':
     'Al iniciar, confirmas: todos los participantes conocen la grabación y están de acuerdo.',
+
+  // --- Vista teléfono (`MobileView.tsx`) — véase el comentario en `en`. -----
+  'mobile.runsOnDesktopLabel': 'Ábrelo en un ordenador',
+  'mobile.runsOnDesktopBody':
+    'La transcripción se calcula en tu propio dispositivo, y para eso hace falta un ordenador con Chrome o Edge. El modelo se descarga allí una sola vez, unos 1,5 GB, y después todo funciona sin conexión.',
 };

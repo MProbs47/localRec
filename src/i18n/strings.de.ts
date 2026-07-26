@@ -235,4 +235,13 @@ export const de: Record<StringKey, string> = {
   // „Einwilligungs-Hinweis (U6)"), nicht selbst formuliert.
   'consent.note':
     'Mit dem Start bestätigst du: Alle Teilnehmenden wissen von der Aufnahme und sind einverstanden.',
+
+  // --- Handy-Ansicht (`MobileView.tsx`) ------------------------------------
+  // Der einzige neu getextete Block dieser Ansicht — alles andere dort ist
+  // bestehender Text (Wortmarke, die zwei Untertitelzeilen, die Tippschleife,
+  // und `info.what1/3/4` als die drei Fakten). Kein Fehler und keine
+  // Entschuldigung: es sagt, wo das Werkzeug läuft und was der Start kostet.
+  'mobile.runsOnDesktopLabel': 'Am Computer öffnen',
+  'mobile.runsOnDesktopBody':
+    'Die Transkription rechnet auf deinem Gerät und braucht dafür einen Computer mit Chrome oder Edge. Das Modell lädt dort einmalig ~1.5 GB, danach läuft alles offline.',
 };

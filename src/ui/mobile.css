@@ -1,0 +1,157 @@
+/*
+ * mobile.css — Layout der Handy-Ansicht (`MobileView.tsx`).
+ *
+ * Owner-Entscheid (2026-07-26): eine EIGENE Ansicht fürs Telefon, keine
+ * Umgestaltung der bestehenden Seite. Die Desktop-Komposition (theme.css) ist
+ * abgenommen und bleibt unangetastet — darum steht hier keine einzige Regel,
+ * die einen `.device`-Selektor überschreibt, und darum ist dies eine eigene
+ * Datei statt eines Media-Query-Blocks in theme.css. Wer am Gehäuse arbeitet,
+ * kann diese Datei ignorieren, und umgekehrt.
+ *
+ * Zweiter Owner-Entscheid derselben Runde: KEINE Interaktion. Kein Knopf, kein
+ * Menü, kein Sprachwähler, kein Weg in die App — die Seite wird gelesen, nicht
+ * bedient. Darum gibt es hier auch keine Hover-, Fokus- oder Antippflächen zu
+ * gestalten: es existiert kein einziges interaktives Element.
+ *
+ * Was NICHT hier steht: Farben, Schriften, Raster. Die Tokens (§2) kommen aus
+ * theme.css, das `MobileView.tsx` mitimportiert — dieselbe Formsprache, eine
+ * Quelle. Ebenso geerbt: `.screen__lines`/`.screen__line`/`.screen__cursor`,
+ * die Klassen der wiederverwendeten Tippschleife.
+ *
+ * Verbindliche Verbote (§1) gelten hier genauso: keine Gradienten, Schatten,
+ * Blurs; --signal ausschliesslich am „Rec" der Wortmarke; keine
+ * Icon-Bibliothek; keine Animation ausser dem Cursor der Tippschleife.
+ */
+
+.mobile {
+  min-height: 100dvh;
+  /* Hochkant sind es ~390px; die Deckelung greift erst im Querformat, das
+     dieselbe Ansicht trifft (siehe die Erkennung in main.tsx). */
+  max-width: 34rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  /* Notch oben, Home-Indikator unten — die Spalte hört nicht am Glasrand auf. */
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 20px
+           calc(28px + env(safe-area-inset-bottom, 0px));
+  gap: 26px;
+}
+
+/* ── Kopf: Wortmarke, Haarlinie, zwei Zeilen ──────────────────────────────
+   Eine Gruppe mit eigenen Innenabständen, nicht vier Geschwister im
+   26px-Flexabstand der Spalte: die Haarlinie gehört zur Marke (etwas mehr Luft
+   über ihr als unter ihr, wie am Gerät), und das lässt sich nicht mit einem
+   gemeinsamen Gap ausdrücken. Kein negativer Rand, der gegen den Gap drückt —
+   das war der erste Entwurf und es hätte beim nächsten Gap-Wert gekippt. */
+.mobile__head { display: block; }
+
+/* Dieselbe Marke wie am Gerät, auf eine Telefonbreite gerechnet: bei 390px
+   sind 15vw ≈ 58px, „localRec" bleibt damit einzeilig. Eigene Klasse statt
+   `.device__title`, damit eine künftige Desktop-Korrektur diese Ansicht nicht
+   mitverschiebt (und umgekehrt). */
+.mobile__wordmark {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 0.92;
+  font-size: clamp(44px, 15vw, 64px);
+}
+.mobile__rec { color: var(--signal); }
+
+.mobile__rule {
+  height: var(--hairline);
+  background: var(--ink);
+  margin: 14px 0 10px;
+}
+
+/* Die zwei Zeilen des Geräts, wörtlich (`header.subtitle*`) — beide voll
+   schwarz, die Flugmodus-Zeile wird NICHT grau (§3). */
+.mobile__lead {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  font-size: 17px;
+}
+.mobile__lead + .mobile__lead { margin-top: 6px; }
+
+/* ── Das Display: die Signatur der Ansicht ────────────────────────────────
+   Der einzige Beweis, den eine Landeseite führen kann, ist das Gerät selbst
+   bei der Arbeit — darum steht hier derselbe doppelte Bezel wie am Desktop
+   (`--bezel`/`--mat`/`--radius-panel`) um dieselbe schwarze Scheibe, und darin
+   läuft die echte `DemoLoop`, nicht ein Screenshot. Alles andere auf dieser
+   Seite ist bewusst still. */
+.mobile__panel {
+  border: var(--bezel) solid var(--ink);
+  padding: var(--mat);
+  border-radius: var(--radius-panel);
+  background: var(--bg);
+}
+
+.mobile__screen {
+  background: var(--screen);
+  border-radius: var(--radius-screen);
+  color: var(--screen-text);
+  padding: 16px;
+  /* Höhe für sechs Zeilen: die deutschen Demo-Zeilen brauchen vier, aber
+     fr/it/es brechen um. Keine feste Höhe mit `overflow: hidden` wie am
+     Gerät — hier darf die Scheibe wachsen, statt Text zu verschlucken. */
+  min-height: 200px;
+}
+
+/* ── Der Hinweis ─────────────────────────────────────────────────────────
+   Die Seite kann nichts ausführen, also ist dies das Ergebnis, das sie
+   liefert: wo das Werkzeug läuft. Einzige umrandete Fläche ausserhalb des
+   Displays — Haarlinie, nicht invertiert: schwarz gefüllt gäbe es ein zweites
+   Display, und die Signatur soll die eine bleiben. */
+.mobile__handoff {
+  border: var(--hairline) solid var(--ink);
+  border-radius: var(--radius-screen);
+  padding: 15px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* Gravurschrift wie am Gerät: Mono, Versalien, gesperrt. Es ist ein Etikett,
+   kein Satz. */
+.mobile__handoff-label {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.mobile__handoff-body {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+/* ── Die drei Fakten: Haarlinien-Liste, ohne Nummern ─────────────────────
+   Bewusst nicht 01/02/03 wie die Schrittliste am Gerät: das dort IST eine
+   Reihenfolge (Ordner → Knopf → Sprecher), das hier sind drei gleichrangige
+   Aussagen. Eine Nummer würde eine Abfolge behaupten, die es nicht gibt. */
+.mobile__facts {
+  list-style: none;
+  margin: 0 0 auto; /* `auto` unten: bleibt Platz, sammelt er sich am Schluss */
+  padding: 0;
+}
+
+.mobile__fact {
+  border-top: var(--hairline) solid var(--ink);
+  padding: 13px 0;
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.mobile__fact:first-child { border-top: none; padding-top: 0; }
+.mobile__fact:last-child { padding-bottom: 0; }

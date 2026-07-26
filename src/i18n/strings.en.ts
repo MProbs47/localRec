@@ -346,4 +346,13 @@ export const en = {
   // record, so there's no consent to confirm.
   'consent.note':
     'By starting, you confirm: everyone taking part knows about the recording and agrees to it.',
+
+  // --- Phone view (`MobileView.tsx`) ---------------------------------------
+  // The only newly written copy in that view — everything else it shows is
+  // existing text (wordmark, the two subtitle lines, the demo loop, and
+  // `info.what1/3/4` as its three facts). Not an error and not an apology:
+  // it names where the tool runs and what it costs to start.
+  'mobile.runsOnDesktopLabel': 'Open it on a computer',
+  'mobile.runsOnDesktopBody':
+    'Transcription runs on your own device, and that takes a computer with Chrome or Edge. The model downloads once there, about 1.5 GB, and everything runs offline after that.',
 } satisfies Record<string, string>;
