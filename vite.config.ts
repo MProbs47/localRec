@@ -3,6 +3,7 @@ import { join, relative, resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA, type VitePWAOptions } from 'vite-plugin-pwa';
+import { CSP_HEADER_STRING } from './src/trust/csp';
 
 /**
  * `vite-plugin-pwa` options, exported by name so tests can assert on the
@@ -78,14 +79,36 @@ export const pwaOptions: Partial<VitePWAOptions> = {
 };
 
 // Mirrors public/_headers (F4) so `npm run dev`/`vite preview` behave like
-// prod. Deliberately a subset: HSTS is meaningless over plain http, and CSP
-// is skipped here because index.html's meta CSP already covers dev pages
-// and dev workers staying CSP-free is fine locally. Keep in sync with
-// public/_headers by hand — see the comment there for the source of truth.
+// prod. HSTS is deliberately absent: it is meaningless over plain http.
 export const DEV_PARITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'Permissions-Policy': 'camera=(), geolocation=(), microphone=(self)',
+};
+
+/**
+ * `vite preview` additionally serves the REAL CSP header — the same string
+ * `public/_headers` ships.
+ *
+ * This used to be skipped, with the reasoning that `index.html`'s `<meta>` CSP
+ * covers local pages and "dev workers staying CSP-free is fine locally". That
+ * reasoning was wrong, and it cost two production-only failures: a Worker
+ * takes its CSP from the HTTP headers of its OWN script response and never
+ * from the page's meta tag, so every local run exercised a CSP-free worker
+ * while production ran a locked-down one. Both bugs — transformers.js falling
+ * back to a jsdelivr fetch, and ORT dynamic-importing its glue from a `blob:`
+ * URL — lived exactly in that blind spot and were invisible until deploy.
+ *
+ * `preview` serves the production bundle, so the production CSP belongs on it.
+ *
+ * **The dev server keeps no CSP, on purpose.** Vite's HMR client needs inline
+ * script, `eval` and a websocket back to the dev server; a production-grade
+ * CSP would break `npm run dev` outright. `preview` is the honest rehearsal
+ * stage — run it before shipping.
+ */
+export const PREVIEW_HEADERS = {
+  ...DEV_PARITY_HEADERS,
+  'Content-Security-Policy': CSP_HEADER_STRING,
 };
 
 /**
@@ -214,5 +237,5 @@ export default defineConfig({
   base: '/',
   plugins: [react(), VitePWA(pwaOptions), buildOutputGuard()],
   server: { headers: DEV_PARITY_HEADERS },
-  preview: { headers: DEV_PARITY_HEADERS },
+  preview: { headers: PREVIEW_HEADERS },
 });

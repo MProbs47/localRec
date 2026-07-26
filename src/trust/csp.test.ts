@@ -67,10 +67,25 @@ describe('CSP constants (src/trust/csp.ts)', () => {
     }
   });
 
-  it('does not allow wildcard or unsafe-inline in script-src (only self + wasm-unsafe-eval)', () => {
+  // `blob:` is in there deliberately — ORT dynamic-imports its WASM glue from
+  // a Blob it builds itself, and without it the engine does not start (this
+  // took down the first production deploy; see csp.ts for the mechanism).
+  // What must NEVER appear is a wildcard or `'unsafe-inline'`/`'unsafe-eval'`:
+  // those would let FOREIGN script in, which is a different thing entirely
+  // from letting this origin run a Blob it authored.
+  it('allows exactly self + wasm-unsafe-eval + blob: in script-src, nothing looser', () => {
     expect(new Set(CSP_CORE_DIRECTIVES['script-src'])).toEqual(
-      new Set(["'self'", "'wasm-unsafe-eval'"]),
+      new Set(["'self'", "'wasm-unsafe-eval'", 'blob:']),
     );
+  });
+
+  it('never admits foreign or inline script', () => {
+    for (const value of CSP_CORE_DIRECTIVES['script-src']) {
+      expect(value).not.toBe('*');
+      expect(value).not.toBe("'unsafe-inline'");
+      expect(value).not.toBe("'unsafe-eval'");
+      expect(value.startsWith('http')).toBe(false);
+    }
   });
 
   // Drift test: index.html (<meta>, local-only fallback) and public/_headers

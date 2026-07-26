@@ -47,14 +47,41 @@ export const HF_MODEL_HOSTS = [
 
 /**
  * Directives that are valid both as a real HTTP header and inside a
- * `<meta http-equiv="Content-Security-Policy">` tag. `script-src` carries
- * `'wasm-unsafe-eval'` because the ONNX Runtime WASM fallback used by
- * transformers.js needs it even though the primary path is WebGPU.
+ * `<meta http-equiv="Content-Security-Policy">` tag.
+ *
+ * **`script-src` carries two allowances that look alarming and aren't.**
+ *
+ * `'wasm-unsafe-eval'` — the ONNX Runtime WASM backend needs it even on the
+ * WebGPU path, because that path IS a WASM build (JSEP/asyncify).
+ *
+ * `blob:` — ONNX Runtime does not import its WASM glue module from its URL.
+ * It fetches the `.mjs`, wraps the response in a `Blob`, and dynamic-imports
+ * the resulting `blob:` URL:
+ *
+ * ```js
+ * is = async a => URL.createObjectURL(await (await fetch(a)).blob());
+ * tc = async a => (await import(a)).default;
+ * ```
+ *
+ * That import is a script load, so `script-src` governs it (`script-src-elem`
+ * falls back to it). Without `blob:` the engine cannot start AT ALL — the app
+ * shows "The model could not be loaded", not a degraded mode.
+ *
+ * This cost the first production deploy. It could not show up before it,
+ * either: a Worker gets its CSP from the HTTP headers of its OWN script
+ * response, never from the page's `<meta>` tag, so every local run had a
+ * CSP-free worker. That is why `vite preview` now sends `CSP_HEADER_STRING`
+ * for real (see `vite.config.ts`) instead of trusting the meta tag.
+ *
+ * What it actually permits: executing Blobs this same origin created. With
+ * `default-src 'self'`, no user-supplied HTML anywhere, and `object-src
+ * 'none'`, there is no path by which an attacker gets to author one — and
+ * `worker-src` already had to allow `blob:` for the same library.
  */
 export const CSP_CORE_DIRECTIVES = {
   'default-src': ["'self'"],
   'connect-src': ["'self'", ...HF_MODEL_HOSTS],
-  'script-src': ["'self'", "'wasm-unsafe-eval'"],
+  'script-src': ["'self'", "'wasm-unsafe-eval'", 'blob:'],
   'style-src': ["'self'", "'unsafe-inline'"],
   'img-src': ["'self'", 'data:', 'blob:'],
   'worker-src': ["'self'", 'blob:'],

@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   CLOUDFLARE_PAGES_MAX_FILE_BYTES,
   DEV_PARITY_HEADERS,
+  PREVIEW_HEADERS,
   checkBuildOutput,
   pwaOptions,
   type BuiltFile,
 } from './vite.config';
 import viteConfig from './vite.config';
+import { CSP_HEADER_STRING } from './src/trust/csp';
 
 // U1 test scenario 1: the build must not be able to precache the ~1.5 GB
 // Whisper model (KTD5). We assert on the *config shape* rather than running
@@ -111,8 +113,28 @@ describe('dev/preview header parity (vite.config.ts)', () => {
     expect(viteConfig.server?.headers).toBe(DEV_PARITY_HEADERS);
   });
 
-  it('applies DEV_PARITY_HEADERS to the preview server', () => {
-    expect(viteConfig.preview?.headers).toBe(DEV_PARITY_HEADERS);
+  it('applies PREVIEW_HEADERS to the preview server', () => {
+    expect(viteConfig.preview?.headers).toBe(PREVIEW_HEADERS);
+  });
+
+  // The regression lock for the blind spot that cost two production-only
+  // failures: Workers take their CSP from their own response headers, never
+  // from the page's <meta> tag, so a CSP-free preview cannot rehearse what
+  // production does to a worker. `preview` must send the real thing.
+  it('preview sends the production CSP as a real header, byte for byte', () => {
+    expect(PREVIEW_HEADERS['Content-Security-Policy']).toBe(CSP_HEADER_STRING);
+  });
+
+  it('preview keeps the three parity headers alongside it', () => {
+    expect(PREVIEW_HEADERS).toMatchObject(DEV_PARITY_HEADERS);
+  });
+
+  // Vite's HMR client needs inline script, eval and a websocket home; a
+  // production CSP would break `npm run dev` outright. The rehearsal stage is
+  // `preview`, not `dev`.
+  it('the dev server deliberately sends no CSP', () => {
+    expect(DEV_PARITY_HEADERS).not.toHaveProperty('Content-Security-Policy');
+    expect(viteConfig.server?.headers).toBe(DEV_PARITY_HEADERS);
   });
 
   it('carries exactly the three parity headers, matching public/_headers', () => {
