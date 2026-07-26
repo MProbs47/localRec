@@ -324,7 +324,7 @@ export class Engine {
 
   // ───────────────────────────── Live control ──────────────────────────────
 
-  /** Begins a new live pseudo-live block session. No-op if one is already running (mirrors `WorkerApi.start`). `language`: Whisper code or `'auto'` (per-window detection). */
+  /** Begins a new live pseudo-live block session. No-op if one is already running (mirrors `WorkerApi.start`). `language`: Whisper code (`'auto'` is a legacy sentinel that ends up as English — see `TranscribeOptions.language`). */
   startLive(language?: string): void {
     void this.#transcriptionApi.start(language);
   }
@@ -349,7 +349,7 @@ export class Engine {
     await this.#transcriptionApi.stop();
   }
 
-  /** Whole-file batch transcription for the import path; hides transfer + progress proxy. `language`: Whisper code or `'auto'` (per-window detection). */
+  /** Whole-file batch transcription for the import path; hides transfer + progress proxy. `language`: Whisper code (`'auto'` is a legacy sentinel that ends up as English — see `TranscribeOptions.language`). */
   transcribeFile(
     pcm: Float32Array,
     onProgress?: (fraction: number) => void,

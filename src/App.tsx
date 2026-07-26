@@ -14,7 +14,7 @@
  *
  * Deliberately still headless-unverifiable at the edges: the deep §5
  * integration (fileSink/writers, OPFS persistence + heartbeat, Wake Lock,
- * the FirstRun model-download engine and crash-recovery detection) is the
+ * the first-run model-download flow (`FirstRunScreens.tsx`) and crash-recovery detection) is the
  * remaining hardware milestone (U12a) — those subsystems exist (U6/U7/U9/
  * U10/U11) but wiring them needs a real mic, WebGPU and File System Access,
  * so they are not fabricated blind here. The `downloading`/`recovery`/
@@ -41,7 +41,7 @@
  *
  * **U20b addendum: the real import pipeline.** `handleFileSelected` now
  * actually runs the file through `session/importPipeline.ts`'s `runImport`
- * (decode -> `RecordingCoordinator.start()` -> U20a's paced batch-feed ->
+ * (decode -> `RecordingCoordinator.start()` -> the paced batch-feed below ->
  * `coordinator.stop()`) instead of just parking the `Blob`. Three pieces
  * make this work without touching the recording path:
  *  - **The gesture trap (Opus decision A).** `showOpenFilePicker` (the file
@@ -64,7 +64,7 @@
  *    "Modell konnte nicht geladen werden" for an import failure).
  *  - **The batch-transcription adapter** (built inline in
  *    `handleFileSelected` below) mirrors the live feed loop's
- *    `Comlink.transfer` call exactly, just driven by U20a's paced feeder
+ *    `Comlink.transfer` call exactly, just driven by this adapter's own paced feeder
  *    instead of the live wall-clock interval.
  *
  * Deliberately NOT built here (see this unit's report): a download-the-
@@ -215,12 +215,13 @@ export default function App() {
   // audio is parked here and a "Sprecher erkennen" button on the stopped screen
   // runs it on demand. The import path still auto-annotates (the user is present).
   const [pendingAnnotation, setPendingAnnotation] = useState<Blob | null>(null);
-  // Transcription language (owner decision after hardware test 01): 'auto' =
-  // Whisper's per-window detection (mixed-language meetings), or a pinned
-  // code (better for Schweizerdeutsch, where detection can misfire). One
-  // session-wide value, deliberately NOT reset per recording — see
-  // `LanguageSelect.tsx`.
-  const [language, setLanguage] = useState<TranscriptionLanguage>('auto');
+  // Transcription language. Default 'de' (owner decision after the file-import
+  // hardware test): transformers.js has NO per-window language detection —
+  // `language: null` hard-codes the <|en|> token ("TODO: Implement language
+  // detection" in its Whisper modeling source), so 'auto' silently meant
+  // "translate to English". One session-wide value, deliberately NOT reset
+  // per recording — see `LanguageSelect.tsx`.
+  const [language, setLanguage] = useState<TranscriptionLanguage>('de');
   // Hardware test 01 round 5: the user usually KNOWS how many people spoke, and
   // saying so removes the hardest unsupervised decision (the count) from the
   // pipeline entirely (`knownSpeakerCount`). null = automatic. Per-session —

@@ -88,7 +88,6 @@ export const it: Record<StringKey, string> = {
   'setup.chooseFolder': 'Scegli cartella',
 
   'language.label': 'Lingua della registrazione',
-  'language.auto': 'Automatico',
   // Sprachnamen — byte-identisch über alle fünf Tabellen, siehe en.ts.
   'language.de': 'Deutsch',
   'language.en': 'English',
@@ -180,8 +179,9 @@ export const it: Record<StringKey, string> = {
   // Ganze Sätze für absolute Laien: der einzige Ort in der App, an dem erklärt
   // wird, also menschlich, aber nicht geschwätzig.
   //
-  // KTD12: die Sprecherlabels im Prompt unten (`Parlante 1, Parlante 2, …`)
-  // sind wörtlich das, was `speaker.label` oben in DIESER Tabelle liefert —
+  // Die Sprecherlabels im Prompt unten (`Parlante 1, Parlante 2, …`) folgen
+  // damit derselben UI-Locale und sind wörtlich das, was `speaker.label` oben
+  // in DIESER Tabelle liefert —
   // eine italienische Sitzung schreibt „Parlante 1" in `transkript-sprecher.txt`,
   // und der Prompt muss dem Sprachmodell genau diese Datei beschreiben.
   //

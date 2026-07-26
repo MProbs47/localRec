@@ -184,8 +184,9 @@ describe('no forgotten copy-paste rows — it/fr/es differ from German, nothing 
 });
 
 describe('setLocale switches t() output (spot check)', () => {
-  // KTD4 pin lives in `vitest.setup.ts`; any test here that moves the locale
-  // restores it, so state doesn't leak into other test files.
+  // The suite-wide German-locale pin lives in `vitest.setup.ts`; any test here
+  // that moves the locale restores it, so state doesn't leak into other test
+  // files.
   afterEach(() => {
     setLocale('de');
   });

@@ -13,8 +13,9 @@ import { CSP_HEADER_STRING } from './src/trust/csp';
  * the only place the plugin is actually instantiated.
  *
  * `generateSW` (the default strategy) precaches the App Shell. The Whisper
- * model (~0.6 GB, KTD5) is NEVER part of that: it lives in OPFS, fetched at
- * runtime by the app itself, not through the build's asset pipeline. These
+ * model (~1.5 GB, KTD5) is NEVER part of that: it's fetched at runtime by
+ * the app itself (transformers.js' own Cache API bucket, not OPFS — see
+ * `src/storage/modelCache.ts:170`), not through the build's asset pipeline. These
  * `globIgnores` are a defensive backstop in case a model-shaped file ever
  * ends up under `public/` or the build output by mistake — Workbox's
  * `maximumFileSizeToCacheInBytes` default (2 MiB) is deliberately left
@@ -37,10 +38,11 @@ import { CSP_HEADER_STRING } from './src/trust/csp';
  * so without the `runtimeCaching` rule below the service worker would have no
  * copy of it and the very first offline reload would fail to instantiate ONNX
  * Runtime — i.e. transcription would break in exactly the airplane-mode
- * scenario this app is built to prove (R11/R12). `runtimeCaching` (CacheFirst)
+ * scenario this app is built to prove. `runtimeCaching` (CacheFirst)
  * is the lean fix: the content-hashed, immutable WASM is cached the first
  * time it is fetched (during the one online first-run model load), then served
- * from cache forever after — including offline. See U13.
+ * from cache forever after — including offline (the `runtimeCaching` rule
+ * just below).
  */
 export const pwaOptions: Partial<VitePWAOptions> = {
   registerType: 'autoUpdate',

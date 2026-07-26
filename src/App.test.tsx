@@ -377,8 +377,10 @@ function stubMatchMedia(matches: boolean) {
 // suite-wide. A real fix needs either fake timers threaded through this
 // whole file (a much bigger, higher-risk change than one unit should take
 // on unreviewed) or a more surgical mock of the elapsed-clock effect
-// specifically — left open, see the debug doc's "U2: Härtung + Nachweis"
-// section and its restunsicherheiten.
+// specifically — left open as a known, accepted flake: test #4
+// (stop-then-start) can still fail at roughly the ~1-in-25-to-40 rate
+// measured above; re-run it once rather than treating a failure there as a
+// real regression.
 function stubRequestAnimationFrame() {
   Object.defineProperty(window, 'requestAnimationFrame', {
     configurable: true,
@@ -983,10 +985,10 @@ describe('finding 2: a finished recording still has a way back to a fresh storag
  * start a recording while the info view is open.
  */
 describe('U5: info entry point + info pop-up', () => {
-  // KTD4 pins the whole suite to German; the one test below that moves the
-  // locale (`setLocale('fr')`) restores it here, so it can't leak into
-  // whichever test file runs after this one — same discipline
-  // `length.test.ts`/`LocaleSwitch.test.tsx` already take.
+  // The whole suite is pinned to German by default (`vitest.setup.ts`); the
+  // one test below that moves the locale (`setLocale('fr')`) restores it
+  // here, so it can't leak into whichever test file runs after this one —
+  // same discipline `length.test.ts`/`LocaleSwitch.test.tsx` already take.
   afterEach(() => setLocale('de'));
 
   it('the "How it works" engraving is visible on idle', async () => {
@@ -1101,7 +1103,7 @@ describe('U5: info entry point + info pop-up', () => {
     act(() => setLocale('fr'));
     fireEvent.click(screen.getByRole('button', { name: 'Comment ça marche' }));
     // U5b landed the real French table; the suite itself stays pinned to German
-    // (KTD4) and `afterEach` above restores 'de'.
+    // by default and `afterEach` above restores 'de'.
     expect(screen.getByText('Ce qui se passe ici')).toBeInTheDocument();
   });
 });

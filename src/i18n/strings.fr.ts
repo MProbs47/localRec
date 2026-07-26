@@ -11,7 +11,7 @@ import type { StringKey } from './index';
  *
  * Terminologie (einmal festgelegt, durchgehalten):
  *  - Transkript/Transkription → transcription
- *  - Sprecher → locuteur (KTD12: „Locuteur 1" in `speakerLabel()`)
+ *  - Sprecher → locuteur (follows the UI locale: „Locuteur 1" in `speakerLabel()`)
  *  - Ordner → dossier
  *  - Speicherort → emplacement
  *  - Modell → modèle
@@ -88,7 +88,6 @@ export const fr: Record<StringKey, string> = {
   'setup.chooseFolder': 'Choisir un dossier',
 
   'language.label': "Langue de l'enregistrement",
-  'language.auto': 'Automatique',
   // Sprachnamen — byte-identisch über alle fünf Tabellen, siehe en.ts.
   'language.de': 'Deutsch',
   'language.en': 'English',
@@ -184,8 +183,9 @@ export const fr: Record<StringKey, string> = {
   // Ganze Sätze für absolute Laien: der einzige Ort in der App, an dem erklärt
   // wird, also menschlich, aber nicht geschwätzig.
   //
-  // KTD12: die Sprecherlabels im Prompt unten (`Locuteur 1, Locuteur 2, …`)
-  // sind wörtlich das, was `speaker.label` oben in DIESER Tabelle liefert —
+  // Die Sprecherlabels im Prompt unten (`Locuteur 1, Locuteur 2, …`) folgen
+  // damit derselben UI-Locale und sind wörtlich das, was `speaker.label` oben
+  // in DIESER Tabelle liefert —
   // eine französische Sitzung schreibt „Locuteur 1" in `transkript-sprecher.txt`,
   // und der Prompt muss dem Sprachmodell genau diese Datei beschreiben.
   //

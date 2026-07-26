@@ -11,9 +11,9 @@
  * (`formatTranscriptTextWithSpeakers`/`formatSrtWithSpeakers`) is known at
  * once. These are also brand-new output file names
  * (`<base>-sprecher.txt`/`.srt`, never touched by the live `<base>.txt`/`.srt`
- * writers), and `AppendableFile` is append-only (KTD7, no truncate/overwrite)
- * — so a single `append()` of the complete encoded string onto a fresh name
- * is the correct fit, not a mismatch to work around.
+ * writers), and `AppendableFile` only ever appends — it has no
+ * truncate/overwrite — so a single `append()` of the complete encoded string
+ * onto a fresh name is the correct fit, not a mismatch to work around.
  */
 import type { AlignedSegment } from '../diarization/align';
 import { formatSrtWithSpeakers, formatTranscriptTextWithSpeakers, type SpeakerNameResolver } from './speakerTranscript';

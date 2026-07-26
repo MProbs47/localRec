@@ -38,10 +38,12 @@ export interface TranscriptSegment {
 
 export interface TranscribeOptions {
   /**
-   * Source language for Whisper: a code like `'de'`/`'en'`/`'it'`, or the
-   * sentinel `'auto'` for Whisper's own per-window language detection
-   * (mixed-language meetings). Default `'de'` — the pre-selector behavior,
-   * kept so a caller that passes nothing keeps the calibrated CH-de path.
+   * Source language for Whisper: a code like `'de'`/`'en'`/`'it'`. The
+   * legacy sentinel `'auto'` maps to a null language token — CAUTION: that is
+   * NOT detection; transformers.js defaults null to English (the UI no longer
+   * offers it, see `whisperEngine.transcribe`). Default `'de'` — the
+   * pre-selector behavior, kept so a caller that passes nothing keeps the
+   * calibrated CH-de path.
    */
   language?: string;
   /** Default `'transcribe'` (same-language text). `'translate'` always outputs English. */

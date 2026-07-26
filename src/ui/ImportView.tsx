@@ -18,7 +18,7 @@
  * "never show a checkmark before the thing happened" discipline U12's
  * `Steps` component uses.
  *
- * **Injectable picker (`pickFile` prop), same DI shape as `FirstRun.tsx`'s
+ * **Injectable picker (`pickFile` prop), same DI shape as `modelCache.ts`'s
  * `fetchImpl`/`storageGate`.** Defaults to the real `pickAudioFile` so
  * production callers pass nothing; tests inject a fake to drive the
  * picked/cancelled/failed paths without a real file dialog.

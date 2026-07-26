@@ -76,7 +76,6 @@ export const de: Record<StringKey, string> = {
   'setup.chooseFolder': 'Ordner wählen',
 
   'language.label': 'Sprache der Aufnahme',
-  'language.auto': 'Automatisch',
   'language.de': 'Deutsch',
   'language.en': 'English',
   'language.it': 'Italiano',

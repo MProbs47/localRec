@@ -3,7 +3,7 @@
  * `WhisperEngine`, exposes a lean control surface (`initialize`/`start`/
  * `feedAudio`/`stop`/`transcribeFile`) over Comlink, and posts finalized
  * transcript blocks straight out via raw `postMessage` — no interim tier,
- * no sub-session/segmentation machinery (KTD-W1, KTD-W2, KTD-W3).
+ * no sub-session/segmentation machinery (KTD-W2, KTD-W3).
  *
  * Two separate transport mechanisms, deliberately (same reasoning as the
  * pre-Whisper worker):
@@ -79,7 +79,7 @@ const workerScope = self as unknown as WorkerScope;
 export interface WorkerApi {
   /** Loads the model and runs warm-up. Rejects if either step fails. */
   initialize(onProgress: LoadProgressCallback): Promise<void>;
-  /** Begins a new live pseudo-live block session (`LiveBlockDriver`). No-op if one is already running. `language` is a Whisper code or `'auto'` (see `TranscribeOptions.language`); omitted → the engine's default. */
+  /** Begins a new live pseudo-live block session (`LiveBlockDriver`). No-op if one is already running. `language` is a Whisper code (see `TranscribeOptions.language` for the legacy `'auto'` caveat); omitted → the engine's default. */
   start(language?: string): void;
   /**
    * Pushes one windowed chunk of 16 kHz mono PCM audio (from the main

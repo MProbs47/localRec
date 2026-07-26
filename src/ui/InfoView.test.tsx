@@ -17,9 +17,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InfoView } from './InfoView';
 import { setLocale } from '../i18n/locale';
 
-// KTD4 pins the suite to German; any test here that moves the locale must
-// restore it, or state leaks into the NEXT test file (same caution
-// `length.test.ts`/`LocaleSwitch.test.tsx` already take).
+// The suite is pinned to German by default (`vitest.setup.ts`); any test here
+// that moves the locale must restore it, or state leaks into the NEXT test
+// file (same caution `length.test.ts`/`LocaleSwitch.test.tsx` already take).
 afterEach(() => {
   cleanup();
   setLocale('de');

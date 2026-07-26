@@ -14,7 +14,7 @@
  * exact speaker-less output, so a missing diarization model changes nothing.
  */
 import type { AlignedSegment } from '../diarization/align';
-import { speakerLabel } from '../diarization/align';
+import { speakerLabel } from '../i18n/speakerLabel';
 import { formatSrtCue } from './srtWriter';
 
 /** Resolves a 0-based speaker index to its display name. Defaults to "Sprecher N" (U18 rename passes a custom map). */

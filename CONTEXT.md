@@ -2,6 +2,65 @@
 
 A local-first PWA that captures meeting audio and turns it into a speaker-labelled transcript entirely on-device. This glossary is the ubiquitous language: the words the code, the UI, and we should all use for the same concepts.
 
+## Principles
+
+Code comments cite short decision codes (`SD-`, `KTD`, `R…`) from internal planning
+documents that live outside this repo (see `.gitignore`). The handful that recur
+across the codebase are defined here so an outside reader can resolve them without
+access to those private docs. One-off codes are instead spelled out in place, at
+their single comment site.
+
+These codes are numbered per planning document, not globally, so the same code
+(e.g. `KTD4`) can denote something entirely different depending on which plan a
+given comment traces back to — a definition below applies only where the
+surrounding comment is actually discussing the topic that definition describes.
+
+**SD-2** (speaker naming is user-correctable, not absolute truth): Speaker
+labels resolve through a swappable `SpeakerNameResolver` that defaults to the
+placeholder `speakerLabel` ("Sprecher N"/"Speaker N"). A user rename replaces
+that default consistently everywhere the label is used — the on-screen turn
+display and the exported speaker-labeled transcript never disagree — but it
+never changes the underlying speaker index or the clustering result it came
+from.
+
+**SD-3** (graceful degradation): An optional feature failing must never take the
+app down with it. Concretely: any diarization/speaker-detection failure (model
+absent, download error, inference error) resolves to the plain transcript with no
+speaker labels, instead of surfacing as an app-level error.
+
+**KTD4** (no COOP/COEP): The app deliberately ships without
+`Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy`. WebGPU doesn't need
+them, and `require-corp` would break the one-time model download from Hugging
+Face. Consequence: no `SharedArrayBuffer`/`Atomics` anywhere in the codebase.
+
+**KTD5** (model never precached): The ~1.5 GB Whisper model is never part of the
+PWA's build-time precache (the service worker's Workbox manifest). It's fetched
+at runtime into the browser's own Cache API (the diarization model set instead
+uses an OPFS downloader), kept fully separate from the app-shell asset pipeline.
+
+**KTD7** (feature detection, not a user toggle): Capability differences (e.g.
+whether the File System Access API is available) are resolved by probing what
+the running browser actually supports at the call site, never by a user-facing
+switch or setting.
+
+**KTD12** (Cloudflare Pages constraints): Deployment-shape assumptions baked into
+the build: the app is served from the domain root, any single build asset over
+25 MiB fails the whole deploy (Cloudflare Pages' per-file limit), and a future
+same-origin model host would live on the same Cloudflare account (R2).
+
+**R14** (long-run backpressure): Structures on the live audio/transcript path
+(ring buffer, transcript store, live block driver) use fixed capacity that never
+grows over a multi-hour session — a slow consumer degrades by losing the oldest
+unread data instead of letting memory grow without bound.
+
+**R17** (resumable model download): A Whisper/diarization model download can be
+interrupted (e.g. at 60%) and resumed from where it left off via HTTP `Range`
+requests, instead of restarting from zero.
+
+**R19** (model lifecycle management): The model cache module supports deleting a
+downloaded model set, gating a fresh download on available disk space, and
+unloading an idle model from RAM after inactivity.
+
 ## Language
 
 ### Engine

@@ -129,7 +129,6 @@ export const en = {
   // label: it selects the RECORDING's language, not the UI's.
   'language.label': 'Recording language',
   // Only this one is actually translated (the "auto-detect" choice).
-  'language.auto': 'Automatic',
   // The remaining five are language names spoken in their own language
   // (Whisper language tokens' human names) — kept BYTE-IDENTICAL across all
   // five locale tables on purpose, never translated.

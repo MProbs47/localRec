@@ -40,6 +40,11 @@ them. Speakers can be renamed, and two extra files join the export —
 `transkript-sprecher.txt` and `-sprecher.srt`. It is **post-hoc, not live**, and if the
 diarization models are missing, transcription keeps working untouched.
 
+If the speaker count comes out wrong, open the browser console during diarization and copy
+the `[diarize]` line (segment/speaker counts and durations, nothing else) into a bug report
+— it's the fastest way to tell whether clustering under- or over-split the voices. Like
+everything else here, that line never leaves your device on its own; you choose to share it.
+
 **Interface in five languages:** German, English, Italian, French, Spanish.
 
 **Swiss German to standard German:** Whisper normalizes spoken dialect towards standard
@@ -97,10 +102,13 @@ What the diagram can't show but the architecture rests on:
 - **No context across window boundaries.** Whisper transcribes fixed, independent windows,
   so throughput stays constant however long the session runs — a four-hour meeting is not a
   special case.
-- **Backpressure instead of data loss.** Under load the live driver lowers the block rate
-  and buffers; **audio is never dropped**. Plus a wake lock against screen sleep.
-- **Models come from the Hugging Face Hub and are cached in OPFS** — never in the PWA
-  precache, where they would be orders of magnitude too large.
+- **Bounded backpressure.** Under load the live driver skips transcription ticks and keeps
+  buffering rather than lowering quality; only sustained overload past the buffer cap (36 s
+  by default) drops the oldest audio — a bounded, recorded gap instead of unbounded memory
+  growth. Plus a wake lock against screen sleep.
+- **Models come from the Hugging Face Hub and are cached locally** — the Whisper weights in
+  the browser's Cache API, the diarization models in OPFS — and never in the PWA precache,
+  where they would be orders of magnitude too large.
 
 ---
 
@@ -222,6 +230,9 @@ WebGPU doesn't need them, and `require-corp` would break the model download.
 | Build command          | `npm run build`                    |
 | Build output directory | `dist`                             |
 | `NODE_VERSION` (env)   | `20.19` or newer (Vite 8)          |
+
+Locally, [`.node-version`](.node-version) pins `22`; Pages only needs `20.19` or newer, so
+the two don't have to match.
 
 `base: '/'` serves the domain root; `_headers` ends up in `dist/` after the build and Pages
 applies it automatically. After deploying, verify with a header check that CSP, HSTS and

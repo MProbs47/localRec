@@ -3,7 +3,7 @@
  * guided first run — OPFS presence/completeness, the pre-download
  * space/persist gate, resumable (HTTP-Range) download into OPFS, delete,
  * and the pure inactivity-unload decision. No React/DOM-UI here (per plan)
- * — `FirstRun.tsx`/`StorageManager.tsx` consume this module.
+ * — `diarization.worker.ts`/`StorageManager.tsx` consume this module.
  *
  * **Model-set-agnostic core (not hardcoded to one model).** Every function
  * here takes a `ModelSetSpec` (an `id` naming the model's own OPFS
@@ -132,13 +132,14 @@ export function buildHfResolveUrl(repoId: string, fileName: string): string {
 //
 // `WhisperEngine` (`../worker/model/whisperEngine.ts`) is the engine that
 // actually loads this model via transformers.js' own browser cache +
-// `progress_callback` — Variante A (KTD-W6), same acquisition strategy as
+// `progress_callback` — Variante A (loading via the browser's own Cache
+// API rather than a custom OPFS download), same acquisition strategy as
 // the streaming engine before it. This descriptor is NOT wired to a live
 // OPFS download here: `ensureModelSetReady`/`downloadModelSet` above stay
 // generic and unused for Whisper acquisition; the OPFS path remains
 // deferred dead-code (see this module's header). `WHISPER_MODEL_SET` and
 // `WHISPER_REQUIRED_BYTES` exist purely for Variante-A status/size display
-// (`FirstRun.tsx`/`App.tsx` "~1.5 GB" copy, `getModelSetSizeBytes`-shaped
+// (`FirstRunScreens.tsx`'s "~1.5 GB" copy, `getModelSetSizeBytes`-shaped
 // readouts) so that surface has one real descriptor to point at instead of
 // a hardcoded number.
 //
@@ -393,8 +394,9 @@ export interface StorageGateResult {
 
 /**
  * Checks free space against `requiredBytes` and requests persistent storage
- * (eviction protection, KTD5) — both before any bytes are downloaded. When
- * `estimate()` can't report usage/quota (older/partial browser support),
+ * (protects the downloaded model from the browser's storage eviction) — both
+ * before any bytes are downloaded. When `estimate()` can't report
+ * usage/quota (older/partial browser support),
  * space is treated as unknown and NOT blocking (`hasEnoughSpace: true`) —
  * this gate exists to catch the common case, not to require universal API
  * support before ever attempting a download.
@@ -427,7 +429,7 @@ export interface ModelReadinessDeps {
   store: ModelOpfsStore;
   fetchImpl: FetchLike;
   storageGate: StorageGate;
-  /** Minimum free bytes required before starting a fresh download. The real figure is U13's wiring concern, not this generic module's — callers supply it explicitly rather than this module guessing/hardcoding one model's size. */
+  /** Minimum free bytes required before starting a fresh download. The real figure is the concrete model set's wiring concern, not this generic module's — callers supply it explicitly rather than this module guessing/hardcoding one model's size. */
   requiredBytes: number;
   /**
    * Only the one `ModelEngine` (U2) method this module actually calls

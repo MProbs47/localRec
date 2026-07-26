@@ -43,7 +43,7 @@ describe('CSP constants (src/trust/csp.ts)', () => {
     expect(CSP_META_STRING).toMatch(/connect-src [^;]*'self'/);
   });
 
-  // Covers R10. Allows exactly the documented HF hosts as the only
+  // Locks the connect-src allow-list down: allows exactly the documented HF hosts as the only
   // third-party origins in connect-src, nothing else. The complementary
   // manual check (DevTools: fly-mode on, only same-origin + these hosts
   // ever appear in the Network tab) is a separate manual milestone per the

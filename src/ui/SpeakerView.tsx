@@ -11,7 +11,7 @@
  *
  * **Names are user-correctable, not absolute truth (KTD13/SD-2).** Speaker
  * indices come from unsupervised clustering — "Sprecher 1"/"Sprecher 2" are
- * `speakerLabel`'s placeholder defaults (`align.ts`), not identities. This
+ * `speakerLabel`'s placeholder defaults (`i18n/speakerLabel.ts`), not identities. This
  * component keeps a local `Map<number, string>` of overrides so a rename
  * relabels every turn of that speaker immediately; `onRenameSpeaker` lets
  * `App.tsx` persist the mapping into the export (e.g. re-running
@@ -27,7 +27,7 @@
  */
 import { useState, type ChangeEvent } from 'react';
 import type { AlignedSegment } from '../diarization/align';
-import { speakerLabel } from '../diarization/align';
+import { speakerLabel } from '../i18n/speakerLabel';
 import { t } from '../i18n';
 
 export interface SpeakerViewProps {

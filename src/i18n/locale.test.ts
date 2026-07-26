@@ -25,8 +25,9 @@ describe('resolveLocale', () => {
 });
 
 describe('locale store (getLocale/setLocale/subscribeLocale)', () => {
-  // Every test in this file that moves the locale restores the KTD4 pin —
-  // otherwise state leaks into whichever test file runs next.
+  // Every test in this file that moves the locale restores the suite-wide
+  // German-locale pin (set in `vitest.setup.ts`) — otherwise state leaks into
+  // whichever test file runs next.
   afterEach(() => {
     setLocale('de');
   });

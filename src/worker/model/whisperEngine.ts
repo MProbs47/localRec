@@ -2,7 +2,7 @@
  * Whisper implementation of `TranscriptionEngine` (KTD1, refactor plan 002
  * U1). Uses transformers.js' `automatic-speech-recognition` pipeline —
  * `onnx-community/whisper-large-v3-turbo`, an ONNX conversion of the
- * original OpenAI weights (MIT, see plan's KTD-W1) — on WebGPU, with its
+ * original OpenAI weights (MIT-licensed) — on WebGPU, with its
  * built-in long-form chunking doing the heavy lifting: fixed-size windows
  * with no cross-window attention, so RTF stays constant no matter how long
  * the input audio is (unlike the growing-KV-cache streaming engine this
@@ -115,7 +115,7 @@ interface AsrCallOptions {
   chunk_length_s: number;
   stride_length_s: number;
   return_timestamps: true;
-  /** A Whisper language code, or `null` for transformers.js' own per-window language detection (`TranscribeOptions.language: 'auto'`). */
+  /** A Whisper language code, or `null` (`TranscribeOptions.language: 'auto'`) — CAUTION: transformers.js has no language detection; `null` hard-defaults to the `<|en|>` token ("TODO: Implement language detection" in its Whisper modeling source), which effectively translates non-English speech. */
   language: string | null;
   task: 'transcribe' | 'translate';
 }
@@ -242,9 +242,11 @@ export class WhisperEngine implements TranscriptionEngine {
     // `await` with no clean per-chunk fraction hook (checked against the
     // installed 4.2.0 source for this unit). Reporting 0 before and 1
     // after is honest; fabricating a fake mid-progress tick would not be.
-    // 'auto' → null: transformers.js treats a null language as "detect per
-    // 30 s window" (Whisper's native detection) — the mixed-language meeting
-    // case. Everything else passes through as an explicit language token.
+    // 'auto' → null. CAUTION: this is NOT per-window detection. transformers.js
+    // has never implemented Whisper's language detection ("TODO: Implement
+    // language detection" in modeling_whisper.js) — null falls back to the
+    // <|en|> token, which on non-English audio effectively translates instead
+    // of transcribing. Hence App.tsx defaults to 'de', not 'auto'.
     const language = opts?.language ?? 'de';
     opts?.onProgress?.(0);
     const out = await asr(pcm, {

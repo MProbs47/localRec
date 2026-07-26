@@ -948,7 +948,6 @@ body {
   font-size: 14px;
   letter-spacing: 0.08em;
 }
-.first-run__error { display: grid; gap: 6px; }
 .first-run__error-detail { color: var(--signal); font-family: var(--font-mono); }
 
 /* idle: der bewusste "Modell laden"-Knopf im Display (§1 — kein Auto-Download).
@@ -1198,10 +1197,10 @@ body {
   font-size: clamp(12px, 1.4vw, 18px);
   line-height: 1.5;
 }
-.dots { display: inline-flex; gap: 6px; }
+.dots { display: inline-flex; gap: 0.3em; }
 .dots__dot {
-  width: 0.5em;
-  height: 0.5em;
+  width: 0.3em;
+  height: 0.3em;
   border-radius: 50%;
   background: var(--screen-dim);
   opacity: 0.25;

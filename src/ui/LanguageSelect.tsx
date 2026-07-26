@@ -4,10 +4,11 @@
  * the folder is chosen — the same "after Speicherort" placement on each, so
  * the three landings keep reading as one device.
  *
- * 'auto' is the default and maps to Whisper's own per-30s-window language
- * detection (mixed-language meetings just work); an explicit code pins the
- * language — the better choice for Schweizerdeutsch recordings, where
- * detection can misfire (classically: Dutch) and forced 'de' is calibrated.
+ * 'de' is the default, and there is deliberately NO "automatic" option
+ * (owner decision after the file-import hardware test): transformers.js has
+ * no language detection — a null language hard-defaults to the <|en|> token,
+ * so "auto" would silently translate German audio to English (see
+ * whisperEngine.ts). The engine still maps a stray 'auto' defensively.
  *
  * One shared value lives in App (session-wide, deliberately NOT reset per
  * recording — whoever records English meetings records the next one in
@@ -15,22 +16,20 @@
  */
 import { t, type StringKey } from '../i18n';
 
-export type TranscriptionLanguage = 'auto' | 'de' | 'en' | 'it' | 'fr' | 'es';
+export type TranscriptionLanguage = 'de' | 'en' | 'it' | 'fr' | 'es';
 
 /**
- * What the selector offers, paired with the i18n key for its label —
- * `'auto'` = Whisper per-window detection; the codes are Whisper language
- * tokens. Labels are resolved via `t()` inside the component (render time),
- * NOT at module scope: `main.tsx` sets the locale only after its static
- * imports (this module among them) have already run, so a module-level
- * `t()` call would freeze on whatever locale was active before that (KTD14,
- * same reasoning as `DemoLoop.tsx`'s `demoLines`/`ModeToggle.tsx`'s
- * `ALL_OPTION_KEYS`). Every entry but `auto` is a language name spoken in
- * its own language — kept byte-identical across all five locale tables,
- * never actually translated; only `language.auto` ("Automatisch") is.
+ * What the selector offers, paired with the i18n key for its label — the
+ * codes are Whisper language tokens. Labels are resolved via `t()` inside
+ * the component (render time), NOT at module scope: `main.tsx` sets the
+ * locale only after its static imports (this module among them) have
+ * already run, so a module-level `t()` call would freeze on whatever locale
+ * was active before that (KTD14, same reasoning as `DemoLoop.tsx`'s
+ * `demoLines`/`ModeToggle.tsx`'s `ALL_OPTION_KEYS`). Every entry is a
+ * language name spoken in its own language — kept byte-identical across all
+ * five locale tables, never actually translated.
  */
 const LANGUAGE_OPTIONS: readonly { value: TranscriptionLanguage; labelKey: StringKey }[] = [
-  { value: 'auto', labelKey: 'language.auto' },
   { value: 'de', labelKey: 'language.de' },
   { value: 'en', labelKey: 'language.en' },
   { value: 'it', labelKey: 'language.it' },

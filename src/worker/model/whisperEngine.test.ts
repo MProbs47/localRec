@@ -276,14 +276,15 @@ describe('WhisperEngine (KTD-W4 guardrails + chunk->segment mapping, fake pipeli
       expect(fake.getLastCallOptions()?.language).toBe('de');
     });
 
-    it("maps 'auto' to a null language — transformers.js' own per-window detection", async () => {
+    it("maps the legacy 'auto' sentinel to a null language token", async () => {
       const fake = makeFakePipelineFactory(emptyOutput);
       const engine = new WhisperEngine({ createPipeline: fake.createPipeline });
       await engine.load(() => {});
 
       await engine.transcribe(new Float32Array(16000), { language: 'auto' });
-      // Exactly null, not undefined/'auto': null is the value transformers.js'
-      // generation config understands as "detect the language".
+      // Exactly null, not undefined/'auto': transformers.js' generation config
+      // has no detection and treats null as English — the mapping only exists
+      // so a stray 'auto' from an old caller degrades predictably.
       expect(fake.getLastCallOptions()?.language).toBeNull();
     });
   });

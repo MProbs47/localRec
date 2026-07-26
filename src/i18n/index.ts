@@ -23,8 +23,8 @@ export type StringKey = keyof typeof en;
 
 type StringTable = Record<StringKey, string>;
 
-// All five real tables (KTD7 — no lazy-loading, no code-splitting: the
-// whole bundle carries every locale). Each is `Record<StringKey, string>`,
+// All five real tables (no lazy-loading, no code-splitting: the whole
+// bundle carries every locale). Each is `Record<StringKey, string>`,
 // so a missing/extra key in any of them is a compile error (KTD2) — this
 // registry itself has nothing left to enforce completeness.
 const TABLES: Record<Locale, StringTable> = {

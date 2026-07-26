@@ -19,8 +19,9 @@ describe('interpolate', () => {
 });
 
 describe('t', () => {
-  // KTD4 pin lives in vitest.setup.ts; any test here that moves the locale
-  // restores it, so state doesn't leak into other test files.
+  // The suite-wide German-locale pin lives in vitest.setup.ts; any test here
+  // that moves the locale restores it, so state doesn't leak into other test
+  // files.
   afterEach(() => {
     setLocale('de');
   });

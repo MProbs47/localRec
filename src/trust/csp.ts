@@ -1,5 +1,7 @@
 /**
- * Single source of truth for the app's Content-Security-Policy (KTD9, R10).
+ * Single source of truth for the app's Content-Security-Policy (KTD9; the
+ * connect-src allow-list is locked to exactly the documented Hugging Face
+ * hosts below, nothing else).
  *
  * "Nichts verlässt das Gerät": after the one-time model download, every
  * outgoing connection must be technically blocked, not just promised.

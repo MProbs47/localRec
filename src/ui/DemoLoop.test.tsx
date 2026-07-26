@@ -40,7 +40,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  setLocale('de'); // KTD4 pin — don't leak the locale into other test files
+  setLocale('de'); // restore the suite-wide German-locale pin — don't leak the locale into other test files
 });
 
 describe('DemoLoop follows a locale switch', () => {

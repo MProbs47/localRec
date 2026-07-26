@@ -1,9 +1,10 @@
 /**
- * U11 (R19): shows each managed model set's status/size and a "Modell
- * löschen" action, delegating to `modelCache.ts` (KTD1 discipline — this
- * component has no OPFS/fetch knowledge of its own). Functionally-neutral
- * per this unit's brief (see `FirstRun.tsx`'s header for the same note) —
- * semantic class names only, styling is U12's job.
+ * Bauplatz für die geplante Modellverwaltung (R19/U11): zeigt Status/Grösse
+ * jedes verwalteten Modell-Sets und eine "Modell löschen"-Aktion, delegiert
+ * an `modelCache.ts` (KTD1-Disziplin — diese Komponente hat kein eigenes
+ * OPFS-/Fetch-Wissen). Bewusst noch nicht in `App.tsx` verdrahtet — reine
+ * Komponente ohne Aufrufer, bis die Modellverwaltung als Feature drankommt.
+ * Funktional-neutral (semantische Klassennamen, kein Styling — U12's Job).
  *
  * **Listable, not list-built.** `entries` is an array so a later, second
  * model set (U18's diarization models, KTD15 — "getrennt verwaltet") can be

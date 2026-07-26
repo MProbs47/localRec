@@ -48,7 +48,7 @@
  * an AudioWorklet module can't reliably cross-import — that constraint
  * doesn't apply here, this file runs as an ordinary ES module).
  *
- * **Blockwise decode (KTD18) is explicitly NOT built here (YAGNI).** A 4h
+ * **Blockwise decode is explicitly NOT built here (YAGNI).** A 4h
  * recording decoded whole is ~0.9 GB of 16 kHz mono Float32 — the plan flags
  * this as a real concern for very long imports, but only *directionally*
  * ("ggf. blockweise dekodieren, Execution-Zeit-Kalibrierung"). This module
@@ -59,7 +59,7 @@
  * `Blob` (e.g. via `Blob.slice()`) into ranges *before* calling this
  * function's decode step per range — no rewrite of the downmix/resample
  * logic here, just a new caller. Left as a documented future concern for
- * U20 (KTD18's actual owner), not attempted now.
+ * U20 (the unit that owns chunked/paced import decoding), not attempted now.
  */
 import { resampleLinear } from '../audio/resample';
 

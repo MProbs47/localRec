@@ -10,10 +10,10 @@ import { RecordingDots } from './RecordingDots';
  * extraction, since each now takes only its own props instead of the full
  * 22-prop pass-through. They share the `first-run` CSS wrapper.
  *
- * NOTE: there is an unrelated, older `src/ui/FirstRun.tsx` (U11's guided
+ * NOTE: there used to be an unrelated `src/ui/FirstRun.tsx` (U11's guided
  * OPFS-download component, kept as deferred dead code per the "Model cache
- * Variante A" decision) — this file is deliberately named differently and
- * does not touch it.
+ * Variante A" decision) — it was deleted as dead code (never wired up);
+ * this file was always named differently and never depended on it.
  */
 
 /** §1: the model load is user-initiated — nothing is fetched until this. */
@@ -60,8 +60,7 @@ export function ImportingScreen({
   return (
     <div className="first-run" data-status="importing">
       <p className="first-run__message">
-        {label}
-        <RecordingDots />
+        {label} <RecordingDots />
       </p>
       <p className="first-run__progress-label">
         {t('firstRun.elapsedSince', { elapsed: formatElapsedShort(importElapsedMs) })}

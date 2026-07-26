@@ -157,7 +157,7 @@ export interface LiveBlockDriverDeps {
   setIntervalImpl?: (fn: () => void, ms: number) => number;
   clearIntervalImpl?: (id: number) => void;
   /**
-   * U4c (#2): hard cap on retained PCM, in ms. When `#pendingPcm` exceeds it,
+   * Hard cap on retained PCM, in ms (#2). When `#pendingPcm` exceeds it,
    * the oldest samples are dropped (a recorded gap) so the buffer stays bounded
    * under sustained RTF > 1 or long silence — the two cases where NOTHING
    * commits, so the ordinary overlap-prune never advances and the buffer would
@@ -168,7 +168,7 @@ export interface LiveBlockDriverDeps {
    */
   maxBufferMs?: number;
   /**
-   * U4b (#3): called with the error when a `transcribe()` cycle throws, instead
+   * Error hook (#3): called with the error when a `transcribe()` cycle throws, instead
    * of letting the rejection escape as an unhandled worker error that silently
    * kills the rest of the session. The driver skips that cycle and keeps
    * ticking; the next tick retries with a fresh transcribe.

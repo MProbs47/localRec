@@ -11,7 +11,6 @@
  * pre-Phase-D output.
  */
 import type { SpeakerTimeline } from './types';
-import { t } from '../i18n';
 
 /** The minimal transcript-segment shape alignment needs — a time-bounded piece of text. */
 export interface TimedTextSegment {
@@ -59,16 +58,4 @@ export function alignTranscript(
   timeline: SpeakerTimeline,
 ): AlignedSegment[] {
   return segments.map((s) => ({ ...s, speaker: assignSpeaker(s, timeline) }));
-}
-
-/**
- * Human-facing 1-based label for a 0-based speaker index (`0` → "Sprecher
- * 1"/"Speaker 1"). Runs on the main thread, not in the diarization worker
- * (callers: `src/output/speakerTranscript.ts`, `src/ui/SpeakerView.tsx`),
- * so reading the UI locale here is safe — no second locale resolution is
- * needed in a worker context (KTD12: the label follows the UI language all
- * the way into the exported speaker transcript).
- */
-export function speakerLabel(speaker: number): string {
-  return t('speaker.label', { n: speaker + 1 });
 }

@@ -3,8 +3,9 @@
  * locale (KTD1/KTD3).
  *
  * DOM-FREE ON PURPOSE: `vitest.setup.ts` imports `setLocale` from this file
- * to pin the test suite's locale (KTD4), and that file is typechecked under
- * `tsconfig.node.json`, whose `lib` is deliberately `ES2022` only — no
+ * to pin the whole test suite's locale to German by default, and that file is
+ * typechecked under `tsconfig.node.json`, whose `lib` is deliberately
+ * `ES2022` only — no
  * `DOM`, because it's shared by every test regardless of environment (node
  * or jsdom). A reference to `navigator`/`window`/`localStorage`/`document`
  * anywhere in this module would break `npm run typecheck`. Resolving the

@@ -2,7 +2,7 @@
 /**
  * U19/U20b: `ImportView`'s picker wiring — driven entirely through an
  * injected `pickFile` fake (no real file dialog, same DI discipline as
- * `FirstRun.test.tsx`'s fake `fetchImpl`/`storageGate`). Covers a picked
+ * `modelCache.test.ts`'s fake `fetchImpl`/`storageGate`). Covers a picked
  * file reaching `onFileSelected`; a cancelled/failed pick leaving a clean
  * resting state with no half-open pipeline start; and (U20b) the
  * folder-first gate — `hasOutputTarget=false` withholds the file picker

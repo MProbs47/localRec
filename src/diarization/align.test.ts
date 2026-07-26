@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alignTranscript, assignSpeaker, speakerLabel, type TimedTextSegment } from './align';
+import { alignTranscript, assignSpeaker, type TimedTextSegment } from './align';
 import type { SpeakerTimeline } from './types';
 
 const timeline: SpeakerTimeline = [
@@ -50,12 +50,5 @@ describe('alignTranscript', () => {
   it('falls back to speaker: null for every segment when no diarization is available (SD-3)', () => {
     const segments: TimedTextSegment[] = [{ text: 'x', startMs: 0, endMs: 500 }];
     expect(alignTranscript(segments, [])).toEqual([{ text: 'x', startMs: 0, endMs: 500, speaker: null }]);
-  });
-});
-
-describe('speakerLabel', () => {
-  it('is 1-based for humans', () => {
-    expect(speakerLabel(0)).toBe('Sprecher 1');
-    expect(speakerLabel(2)).toBe('Sprecher 3');
   });
 });

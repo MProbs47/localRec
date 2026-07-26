@@ -26,8 +26,9 @@
  * labels, `--ink` hairline border, no third colour, no icon library — the
  * same restraint U12's `first-run__action`/`recovery__option` buttons use)
  * rather than inventing a new visual idiom, but its exact placement/sizing
- * is a functional placeholder, the same posture U11's `FirstRun` shipped
- * with before U12 gave it real styling. **Flagged for the project owner's
+ * is a functional placeholder, the same posture the original first-run
+ * screen (now `FirstRunScreens.tsx`) shipped with before U12 gave it real
+ * styling. **Flagged for the project owner's
  * design pass**, not a final look.
  *
  * **Accessibility.** `role="radiogroup"` + `role="radio"` buttons is the
