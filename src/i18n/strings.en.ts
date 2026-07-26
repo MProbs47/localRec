@@ -326,16 +326,16 @@ export const en = {
   // that dishonest copy wherever `sinkIsFallback` is true (App.tsx) and add
   // the end-of-session download affordance on `StoppedScreen`.
   'setup.readyNoteFallback':
-    'This browser has no direct folder access — the recording is kept safely in the browser; the files are offered for download once it stops. Microphone allowed.',
+    'No direct folder access in this browser — the files are offered as a download at the end. Microphone allowed.',
   'meeting.fallbackNote':
-    'This browser has no direct folder access — the recording is kept safely in the browser; the files are offered for download once it stops.',
+    'No direct folder access in this browser — the files are offered as a download at the end.',
   'import.fallbackNote':
-    "This browser has no direct folder access — the transcription is kept safely in the browser; the files are offered for download once it's done.",
+    'No direct folder access in this browser — the files are offered as a download at the end.',
   'steps.locationFallback': 'No folder access — kept in the browser',
   'steps.savedFallback': 'Saved in the browser — download below',
   'stopped.downloadsHeading': 'Download files',
   'stopped.downloadsNote':
-    'This browser has no direct folder access, so nothing was written to disk automatically — the recording was kept safely in the browser instead. Download the files here:',
+    'This browser has no direct folder access, so nothing was written to disk automatically. The files are ready to download here:',
 
   // --- U6 (`RecordSetupView.tsx`/`MeetingView.tsx`) — consent note ---------
   // Rendered ONLY in the `ready` state of both recording paths, right next

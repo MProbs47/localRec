@@ -243,16 +243,16 @@ export const it: Record<StringKey, string> = {
   // non veritiero ovunque `sinkIsFallback` sia vero (App.tsx) e aggiungono
   // la possibilità di scaricare i file a fine sessione su `StoppedScreen`.
   'setup.readyNoteFallback':
-    "Questo browser non consente l'accesso diretto a una cartella — la registrazione viene conservata in modo sicuro nel browser; alla fine i file sono pronti per il download. Microfono consentito.",
+    "Nessun accesso diretto a una cartella in questo browser — i file sono pronti per il download alla fine. Microfono consentito.",
   'meeting.fallbackNote':
-    "Questo browser non consente l'accesso diretto a una cartella — la registrazione viene conservata in modo sicuro nel browser; alla fine i file sono pronti per il download.",
+    "Nessun accesso diretto a una cartella in questo browser — i file sono pronti per il download alla fine.",
   'import.fallbackNote':
-    "Questo browser non consente l'accesso diretto a una cartella — la trascrizione viene conservata in modo sicuro nel browser; alla fine i file sono pronti per il download.",
+    "Nessun accesso diretto a una cartella in questo browser — i file sono pronti per il download alla fine.",
   'steps.locationFallback': 'Nessun accesso alla cartella — salvato nel browser',
   'steps.savedFallback': 'Salvato nel browser — download qui sotto',
   'stopped.downloadsHeading': 'Scarica i file',
   'stopped.downloadsNote':
-    "Questo browser non consente l'accesso diretto a una cartella, quindi non è stato scritto nulla automaticamente su disco — la registrazione è conservata in modo sicuro nel browser. Scaricala qui:",
+    "Questo browser non consente l'accesso diretto a una cartella, quindi non è stato scritto nulla automaticamente su disco. I file sono pronti per il download qui:",
 
   // --- U6 (`RecordSetupView.tsx`/`MeetingView.tsx`) — avviso sul consenso --
   // Vera traduzione dal tedesco (`strings.de.ts`), stessa struttura a due

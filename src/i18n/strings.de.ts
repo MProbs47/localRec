@@ -210,17 +210,25 @@ export const de: Record<StringKey, string> = {
   // Schlüssel ersetzen den unehrlichen Text überall dort, wo `sinkIsFallback`
   // zutrifft (App.tsx), und ergänzen die Download-Möglichkeit am Ende der
   // Sitzung auf `StoppedScreen`.
+  // Owner-Feedback (2026-07-26, Firefox-Hardwaretest): die ursprüngliche
+  // 5-Zeilen-Fassung von `setup.readyNoteFallback` drängte Einwilligungssatz
+  // und Sprachauswahl aus dem `.screen`-Kasten (`theme.css`, feste
+  // `clamp(180px, 30vh, 340px)`-Höhe + `overflow: hidden`). Gekürzt auf das,
+  // was wirklich zählt — kein Ordner, Download kommt am Ende —, ohne etwas
+  // Unehrliches wegzulassen.
   'setup.readyNoteFallback':
-    'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Aufnahme wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit. Mikrofon freigegeben.',
+    'Kein direkter Ordner-Zugriff in diesem Browser — die Dateien gibt es am Ende als Download. Mikrofon freigegeben.',
   'meeting.fallbackNote':
-    'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Aufnahme wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit.',
+    'Kein direkter Ordner-Zugriff in diesem Browser — die Dateien gibt es am Ende als Download.',
   'import.fallbackNote':
-    'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Transkription wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit.',
+    'Kein direkter Ordner-Zugriff in diesem Browser — die Dateien gibt es am Ende als Download.',
   'steps.locationFallback': 'Kein Ordner-Zugriff — im Browser gespeichert',
   'steps.savedFallback': 'Im Browser gespeichert — Download unten',
   'stopped.downloadsHeading': 'Dateien herunterladen',
+  // Etwas länger als die drei oben belassen — `StoppedScreen` teilt sich die
+  // grössere `.screen`-Höhe (`clamp(300px, 60vh, 680px)`), da drängt nichts.
   'stopped.downloadsNote':
-    'Dieser Browser erlaubt keinen direkten Ordner-Zugriff, darum wurde nichts automatisch auf die Festplatte geschrieben — die Aufnahme liegt stattdessen sicher im Browser. Hier herunterladen:',
+    'Dieser Browser erlaubt keinen direkten Ordner-Zugriff, darum wurde nichts automatisch auf die Festplatte geschrieben. Die Dateien liegen stattdessen hier zum Download bereit:',
 
   // --- U6 (`RecordSetupView.tsx`/`MeetingView.tsx`) — Einwilligungs-Hinweis -
   // Deutscher Quelltext verbatim aus dem Plan („Textquellen" →

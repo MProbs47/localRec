@@ -246,16 +246,16 @@ export const es: Record<StringKey, string> = {
   // añaden la posibilidad de descargar los archivos al final de la sesión
   // en `StoppedScreen`.
   'setup.readyNoteFallback':
-    'Este navegador no permite el acceso directo a una carpeta — la grabación se guarda de forma segura en el navegador; al final los archivos quedan listos para descargar. Micrófono permitido.',
+    'Sin acceso directo a una carpeta en este navegador — los archivos quedan listos para descargar al final. Micrófono permitido.',
   'meeting.fallbackNote':
-    'Este navegador no permite el acceso directo a una carpeta — la grabación se guarda de forma segura en el navegador; al final los archivos quedan listos para descargar.',
+    'Sin acceso directo a una carpeta en este navegador — los archivos quedan listos para descargar al final.',
   'import.fallbackNote':
-    'Este navegador no permite el acceso directo a una carpeta — la transcripción se guarda de forma segura en el navegador; al final los archivos quedan listos para descargar.',
+    'Sin acceso directo a una carpeta en este navegador — los archivos quedan listos para descargar al final.',
   'steps.locationFallback': 'Sin acceso a carpeta — guardado en el navegador',
   'steps.savedFallback': 'Guardado en el navegador — descarga abajo',
   'stopped.downloadsHeading': 'Descargar archivos',
   'stopped.downloadsNote':
-    'Este navegador no permite el acceso directo a una carpeta, así que no se escribió nada automáticamente en el disco — la grabación quedó guardada de forma segura en el navegador. Descárgala aquí:',
+    'Este navegador no permite el acceso directo a una carpeta, así que no se escribió nada automáticamente en el disco. Los archivos están listos para descargar aquí:',
 
   // --- U6 (`RecordSetupView.tsx`/`MeetingView.tsx`) — aviso de consentimiento
   // Traducción real del alemán (`strings.de.ts`), misma estructura en dos

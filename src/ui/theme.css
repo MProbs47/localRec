@@ -1139,6 +1139,18 @@ body {
   line-height: 1.5;
 }
 .setup-view__note { max-width: 42ch; }
+/* Owner-Feedback (2026-07-26, Firefox-Hardwaretest): the fallback note
+   (`setup.readyNoteFallback`) is longer than the short "Speicherort …"
+   receipt line the 42ch cap above was tuned for — wrapped into 5 lines it
+   pushed the consent sentence and `LanguageSelect` out of `.screen`'s fixed
+   `clamp(180px, 30vh, 340px)` + `overflow: hidden` box. Scoped to the
+   fallback case only (`RecordSetupView.tsx` adds this class alongside
+   `.setup-view__note` when `sinkIsFallback`) — the 42ch cap stays for the
+   normal short receipt line, which still wants it. `.meeting-view__aside`/
+   `.import-view__selected` (their own fallback notes, `MeetingView.tsx`/
+   `ImportView.tsx`) never had this cap to begin with, so they need no
+   equivalent modifier. */
+.setup-view__note--wide { max-width: none; }
 
 /* Die Helligkeit trägt jetzt die Rangfolge, nicht die Grösse: gedimmt ist
    alles Beiläufige (Speicherort-Bestätigung, Kopfhörer-Hinweis, die

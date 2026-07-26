@@ -248,16 +248,16 @@ export const fr: Record<StringKey, string> = {
   // la possibilité de télécharger les fichiers en fin de session sur
   // `StoppedScreen`.
   'setup.readyNoteFallback':
-    "Ce navigateur n'autorise pas l'accès direct à un dossier — l'enregistrement est conservé en sécurité dans le navigateur ; les fichiers seront proposés au téléchargement à la fin. Microphone autorisé.",
+    "Pas d'accès direct à un dossier dans ce navigateur — les fichiers seront proposés au téléchargement à la fin. Microphone autorisé.",
   'meeting.fallbackNote':
-    "Ce navigateur n'autorise pas l'accès direct à un dossier — l'enregistrement est conservé en sécurité dans le navigateur ; les fichiers seront proposés au téléchargement à la fin.",
+    "Pas d'accès direct à un dossier dans ce navigateur — les fichiers seront proposés au téléchargement à la fin.",
   'import.fallbackNote':
-    "Ce navigateur n'autorise pas l'accès direct à un dossier — la transcription est conservée en sécurité dans le navigateur ; les fichiers seront proposés au téléchargement à la fin.",
+    "Pas d'accès direct à un dossier dans ce navigateur — les fichiers seront proposés au téléchargement à la fin.",
   'steps.locationFallback': "Pas d'accès au dossier — conservé dans le navigateur",
   'steps.savedFallback': 'Enregistré dans le navigateur — téléchargement ci-dessous',
   'stopped.downloadsHeading': 'Télécharger les fichiers',
   'stopped.downloadsNote':
-    "Ce navigateur n'autorise pas l'accès direct à un dossier, rien n'a donc été écrit automatiquement sur le disque — l'enregistrement est conservé en sécurité dans le navigateur. Télécharge-le ici :",
+    "Ce navigateur n'autorise pas l'accès direct à un dossier, rien n'a donc été écrit automatiquement sur le disque. Les fichiers sont prêts au téléchargement ici :",
 
   // --- U6 (`RecordSetupView.tsx`/`MeetingView.tsx`) — note de consentement -
   // Vraie traduction de l'allemand (`strings.de.ts`), même structure en deux

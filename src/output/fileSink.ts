@@ -10,10 +10,25 @@
  *   that location as `append()` is called (R6's live-mirror).
  * - `FallbackSink` — everywhere else (Firefox/Safari/iOS, or a live-mirror
  *   file that lost write permission mid-session). Collects bytes durably in
- *   OPFS (via `OpfsAudioAppender`, reused as-is from `../storage/opfsAudio`
- *   — same append-position/flush discipline, second caller, KTD6) and
- *   offers them back as `Blob`s for an end-of-session "Speichern unter"
- *   (R7, AE1).
+ *   OPFS and offers them back as `Blob`s for an end-of-session "Speichern
+ *   unter" (R7, AE1). Crucially, `FallbackSink` runs on the MAIN thread —
+ *   it's constructed by `createFileSink()`/`restoreFileSink()` from
+ *   `App.tsx` and used directly by `RecordingCoordinator`, never inside a
+ *   Worker. Per the OPFS spec, `createSyncAccessHandle()` (what
+ *   `OpfsAudioAppender`/`opfsAudio.ts` is built on) exists ONLY in a
+ *   dedicated Worker — calling it here would reject/throw before a single
+ *   byte is written (this was a real bug: Firefox's very first `openFile()`
+ *   at recording start hung/threw). `createWritable()` has no such
+ *   restriction, and an OPFS `FileSystemFileHandle` structurally satisfies
+ *   `FileHandleLike` (`createWritable({keepExistingData})` + `getFile()`) —
+ *   the exact surface the live-mirror path below already uses — so
+ *   `FallbackSink` reuses that same `SelfHealingAppendableFile` commit-window
+ *   writer, pointed at the OPFS root instead of a user-chosen folder,
+ *   instead of keeping a second, sync-handle-based write path (DRY).
+ *   `OpfsAudioAppender`/`SyncAccessHandleLike` stay exactly as documented in
+ *   `../storage/opfsAudio` — they remain the correct Worker-side Andockpunkt
+ *   for a future `transcription.worker.ts` audio change; this file no longer
+ *   uses them at all.
  *
  * **Interface shape, and why it's this small (must carry U10).** Both sinks
  * implement exactly `openFile(name): Promise<AppendableFile>` where
@@ -48,18 +63,30 @@
  * `SessionStore`. `#position` is seeded from `getFile().size` on open and
  * advanced by each write's byte length (same discipline as
  * `OpfsAudioAppender`), so a committed window's bytes are never overwritten
- * by the next.
+ * by the next. This one writer class now backs BOTH sinks — the live-mirror
+ * folder handle and the OPFS-root fallback handle satisfy the same
+ * `FileHandleLike` structurally, so there is exactly one commit-window
+ * implementation to reason about.
  *
- * **Why the larger window is crash-safe enough, and what to tune.** The
- * FSA live-mirror file is the *user-visible* mirror, not the crash-safety
- * backstop — U6's append-only OPFS audio (`opfsAudio.ts`) is what
- * guarantees no audio is lost across a crash (KTD6), independent of this
- * file. So a commit window that leaves the last few seconds of the mirror
- * uncommitted is an acceptable trade for avoiding the O(n²) copy: a crash
- * loses at most the current window from the *mirror*, never from the
- * durable OPFS copy. The exact window size (defaults below) and the real
- * large-`.webm` copy cost are an explicit hardware-milestone tuning point —
- * the constants are lean starting guesses, not calibrated numbers.
+ * **Why the larger window is crash-safe enough, and what to tune.** For the
+ * live-mirror, the FSA file is the *user-visible* mirror, not the
+ * crash-safety backstop — U6's append-only OPFS audio (`opfsAudio.ts`) is
+ * what guarantees no audio is lost across a crash (KTD6), independent of
+ * this file. So a commit window that leaves the last few seconds of the
+ * mirror uncommitted is an acceptable trade for avoiding the O(n²) copy: a
+ * crash loses at most the current window from the *mirror*, never from the
+ * durable OPFS audio copy. For the FALLBACK sink, there is no such separate
+ * backstop — its OPFS file IS the only copy of that output — so the same
+ * commit-window trade there means a crash mid-session can lose at most the
+ * current window's worth of `.txt`/`.srt`/`.webm` bytes (bounded by
+ * `maxAppendsPerCommit`/`maxCommitIntervalMs`, the same lean defaults as the
+ * live mirror). That is a marginally weaker guarantee than a hypothetical
+ * per-append sync flush, but it is the necessary and accepted price of being
+ * safely callable from the main thread at all — the alternative
+ * (`createSyncAccessHandle`) doesn't run here, full stop. The exact window
+ * size (defaults below) and the real large-`.webm` copy cost are an explicit
+ * hardware-milestone tuning point — the constants are lean starting guesses,
+ * not calibrated numbers.
  *
  * **R7 Grenzfall — permission revoked mid-session, no data loss.** If any
  * live-mirror operation throws — a `write()`, or the periodic window
@@ -75,7 +102,11 @@
  * is lost; every later `append()` for that file also goes to the fallback.
  * `FileSystemAccessSink.degraded`/`.collectFallbackDownloads()` let a future
  * caller (U12) notice this happened and offer the fallback's download, but
- * U9 itself does not wire any UI for it.
+ * U9 itself does not wire any UI for it. `FallbackSink` itself has nowhere
+ * further to degrade to — its own `SelfHealingAppendableFile` instances are
+ * constructed with no `openFallback`, so a write/commit failure there simply
+ * propagates to the caller instead of silently rerouting (there is no
+ * fallback-of-the-fallback; see that class's constructor doc).
  *
  * **Handle persistence (R6-Fortsetzung über Reload).** `DirectoryHandleLike`
  * values are structured-clonable in a real browser (the plan's own note),
@@ -108,8 +139,6 @@
  * real production path; the actual browser round-trip is this unit's
  * documented manual milestone.
  */
-
-import { OpfsAudioAppender, type SyncAccessHandleLike } from '../storage/opfsAudio';
 
 // --- Shared sink/file abstraction -----------------------------------------
 
@@ -174,70 +203,218 @@ export function hasFileSystemAccess(env: FileSystemAccessEnvLike = getGlobalEnv(
   return typeof env.showDirectoryPicker === 'function';
 }
 
-function toArrayBuffer(data: Uint8Array): ArrayBuffer {
-  // Avoid a copy in the common case (a whole, non-offset buffer); slice only when `data` is a view into a larger buffer.
-  if (data.byteOffset === 0 && data.byteLength === data.buffer.byteLength) {
-    return data.buffer as ArrayBuffer;
+// --- Commit-window appendable file (shared by both sinks) -------------------
+
+/**
+ * Commit-window thresholds, shared by the live-mirror AND fallback sinks
+ * (see file header for the O(n²)-copy rationale). Lean starting guesses — an
+ * explicit hardware-milestone tuning point, not calibrated numbers.
+ */
+export const DEFAULT_MAX_APPENDS_PER_COMMIT = 8;
+export const DEFAULT_MAX_COMMIT_INTERVAL_MS = 10_000;
+
+export interface LiveMirrorCommitOptions {
+  /** Commit (close + reopen) the current window after this many appends. */
+  maxAppendsPerCommit?: number;
+  /** Commit the current window once this long has passed since it opened, even below the append count. */
+  maxCommitIntervalMs?: number;
+  /** Injected clock (ms) — defaults to `Date.now`; overridden in tests for deterministic window timing. */
+  now?: () => number;
+}
+
+/**
+ * Wraps one output file backed by a `FileHandleLike` — the live-mirror's
+ * user-chosen file, OR (see file header) the fallback's OPFS-root file; both
+ * satisfy the same structural surface, so this is the one commit-window
+ * writer for both. Holds a single writable open across a commit window,
+ * writing each `append()` incrementally at the tracked position, and only
+ * closes+reopens (the expensive `keepExistingData` copy) once per window —
+ * see the file header for the crash-safety-vs-perf trade-off.
+ *
+ * `openFallback` is OPTIONAL. When given (the live-mirror's case), any
+ * failure — a `write()` or a periodic window `close()` — silently and
+ * permanently reroutes this file (and only this file's future writes) to a
+ * fallback file opened through it, replaying the current uncommitted
+ * window's bytes so none are lost — R7's Grenzfall, no thrown error. When
+ * omitted (the fallback sink's own case — there is nowhere further to
+ * degrade to), the same failure instead propagates to the caller as a
+ * rejected promise: no silent swallow, no fallback-of-a-fallback.
+ */
+class SelfHealingAppendableFile implements AppendableFile {
+  readonly #fileHandle: FileHandleLike;
+  readonly #openFallback: (() => Promise<AppendableFile>) | undefined;
+  readonly #maxAppends: number;
+  readonly #maxWindowMs: number;
+  readonly #now: () => number;
+
+  #position: number;
+  #writable: WritableFileStreamLike | null = null;
+  #windowOpenedAt = 0;
+  #appendsInWindow = 0;
+  /** Chunks written since the last successful commit — replayed to the fallback if this window fails to commit (R7, no data loss). At most one window's worth. */
+  #uncommitted: Uint8Array[] = [];
+  #degraded: AppendableFile | null = null;
+
+  constructor(
+    fileHandle: FileHandleLike,
+    initialSize: number,
+    openFallback: (() => Promise<AppendableFile>) | undefined,
+    options: LiveMirrorCommitOptions = {},
+  ) {
+    this.#fileHandle = fileHandle;
+    this.#position = initialSize;
+    this.#openFallback = openFallback;
+    this.#maxAppends = options.maxAppendsPerCommit ?? DEFAULT_MAX_APPENDS_PER_COMMIT;
+    this.#maxWindowMs = options.maxCommitIntervalMs ?? DEFAULT_MAX_COMMIT_INTERVAL_MS;
+    this.#now = options.now ?? (() => Date.now());
   }
-  return data.slice().buffer as ArrayBuffer;
+
+  async append(data: Uint8Array): Promise<void> {
+    if (this.#degraded) {
+      await this.#degraded.append(data);
+      return;
+    }
+    // Track for a possible replay-on-degrade BEFORE attempting any FS op, so
+    // a failing write's chunk is included in the fallback replay too.
+    this.#uncommitted.push(data);
+    try {
+      if (!this.#writable) {
+        this.#writable = await this.#fileHandle.createWritable({ keepExistingData: true });
+        this.#windowOpenedAt = this.#now();
+        this.#appendsInWindow = 0;
+      }
+      await this.#writable.write({ type: 'write', position: this.#position, data });
+      this.#position += data.byteLength;
+      this.#appendsInWindow += 1;
+
+      const dueByCount = this.#appendsInWindow >= this.#maxAppends;
+      const dueByAge = this.#now() - this.#windowOpenedAt >= this.#maxWindowMs;
+      if (dueByCount || dueByAge) {
+        await this.#commit();
+      }
+    } catch (err) {
+      if (!this.#openFallback) throw err; // no further fallback available — propagate (see class doc)
+      await this.#degrade();
+    }
+  }
+
+  async close(): Promise<void> {
+    if (!this.#degraded) {
+      try {
+        await this.#commit(); // final commit of any still-open window
+      } catch (err) {
+        if (!this.#openFallback) throw err; // no further fallback available — propagate (see class doc)
+        await this.#degrade();
+      }
+    }
+    await this.#degraded?.close();
+  }
+
+  /**
+   * Closes the open window's writable (committing its writes to the real
+   * file durably) and clears the replay buffer. No-op if no window is open.
+   * May throw (a failing `close()`) — the caller degrades (or propagates) in
+   * that case.
+   */
+  async #commit(): Promise<void> {
+    const writable = this.#writable;
+    if (!writable) return;
+    this.#writable = null; // dead either way after this; never double-closed on the degrade path
+    await writable.close();
+    this.#uncommitted = []; // reached only on a *successful* close — the window is now durable
+    this.#appendsInWindow = 0;
+  }
+
+  /**
+   * R7 Grenzfall: reroute this file to the fallback and replay every
+   * uncommitted-window chunk into it, so nothing written since the last
+   * successful commit is lost. Idempotent-safe to reach only once (guarded
+   * by the `#degraded` check in `append`/`close`). Only reachable when
+   * `openFallback` was actually given — see `append`/`close`.
+   */
+  async #degrade(): Promise<void> {
+    this.#writable = null;
+    const fallback = await this.#openFallback!();
+    this.#degraded = fallback;
+    for (const chunk of this.#uncommitted) {
+      await fallback.append(chunk);
+    }
+    this.#uncommitted = [];
+  }
 }
 
 // --- Fallback (OPFS-backed, download-at-end) sink --------------------------
 
-/** What `FallbackSink` needs to durably persist one named file — a real `SyncAccessHandleLike` (reused from `opfsAudio.ts`) plus a way to read everything written back as a `Blob` for the end-of-session download (R7). */
-export interface FallbackFileHandle {
-  handle: SyncAccessHandleLike;
-  readBlob(): Promise<Blob>;
+/**
+ * What `FallbackSink` needs to durably persist one named file: the same
+ * `FileHandleLike` surface the live-mirror path uses, since a real OPFS
+ * `FileSystemFileHandle` satisfies it structurally (see file header) — plus
+ * a `getFile()` that returns a `Blob` (in a real browser it returns a
+ * `File`, which IS a `Blob`, so this is the exact same call, not a second
+ * one) for the end-of-session download (R7).
+ */
+export interface FallbackFileHandle extends FileHandleLike {
+  getFile(): Promise<Blob>;
 }
 
 /** Opens (creating if needed) the durable backing store for one named fallback file. Injectable — the real implementation is the OPFS Andockpunkt below; tests supply an in-memory fake. */
 export type FallbackFileOpener = (name: string) => Promise<FallbackFileHandle>;
 
+/**
+ * The fallback's per-file object: reuses `SelfHealingAppendableFile`'s
+ * commit-window writer with no `openFallback` (there is nowhere further to
+ * degrade to — a write/commit failure here propagates, see that class's
+ * doc). `toBlob()` is the "am Ende" download step, reusing the same OPFS
+ * handle's `getFile()` that also seeded the initial append position.
+ */
 class FallbackAppendableFile implements AppendableFile {
-  readonly #appender: OpfsAudioAppender;
+  readonly #file: AppendableFile;
   readonly #handle: FallbackFileHandle;
 
-  constructor(handle: FallbackFileHandle) {
+  constructor(handle: FallbackFileHandle, initialSize: number, commitOptions: LiveMirrorCommitOptions) {
     this.#handle = handle;
-    this.#appender = new OpfsAudioAppender(handle.handle);
+    this.#file = new SelfHealingAppendableFile(handle, initialSize, undefined, commitOptions);
   }
 
-  async append(data: Uint8Array): Promise<void> {
-    this.#appender.append(toArrayBuffer(data));
+  append(data: Uint8Array): Promise<void> {
+    return this.#file.append(data);
   }
 
-  async close(): Promise<void> {
-    this.#appender.close();
+  close(): Promise<void> {
+    return this.#file.close();
   }
 
   toBlob(): Promise<Blob> {
-    return this.#handle.readBlob();
+    return this.#handle.getFile();
   }
 }
 
 /**
  * R7/AE1's "intern crash-sicher aufnehmen → am Ende Speichern unter". Every
- * named file gets its own OPFS-backed `OpfsAudioAppender` (durable,
- * append-only, same discipline as the session's audio file, KTD6) so a
- * crash mid-fallback-session loses no more than U6 already tolerates.
- * `collectDownloads()` is the "am Ende" step: reads every file written so
- * far back as a `Blob`, ready for a save-as prompt (not wired to any UI
- * here — U12's job).
+ * named file gets its own OPFS-backed commit-window writer (see file header
+ * for why this is `SelfHealingAppendableFile`, not `OpfsAudioAppender` — that
+ * class's `createSyncAccessHandle()` is Worker-only, and this sink runs on
+ * the main thread). `collectDownloads()` is the "am Ende" step: reads every
+ * file written so far back as a `Blob`, ready for a save-as prompt (not
+ * wired to any UI here — U12's job).
  */
 export class FallbackSink implements FileSink {
   readonly kind: FileSinkKind = 'fallback';
   readonly #open: FallbackFileOpener;
+  readonly #commitOptions: LiveMirrorCommitOptions;
   readonly #files = new Map<string, FallbackAppendableFile>();
 
-  constructor(open: FallbackFileOpener = defaultFallbackFileOpener) {
+  constructor(open: FallbackFileOpener = defaultFallbackFileOpener, commitOptions: LiveMirrorCommitOptions = {}) {
     this.#open = open;
+    this.#commitOptions = commitOptions;
   }
 
   async openFile(name: string): Promise<AppendableFile> {
     const existing = this.#files.get(name);
     if (existing) return existing;
     const handle = await this.#open(name);
-    const file = new FallbackAppendableFile(handle);
+    const current = await handle.getFile(); // seeds the append position — 0 for a brand new OPFS file
+    const file = new FallbackAppendableFile(handle, current.size, this.#commitOptions);
     this.#files.set(name, file);
     return file;
   }
@@ -254,19 +431,15 @@ export class FallbackSink implements FileSink {
 
 // --- Fallback OPFS Andockpunkt (manual milestone, not unit-tested) --------
 //
-// Mirrors `opfsAudio.ts`'s own real-OPFS Andockpunkt, extended with
-// `getFile()` (a separate, simpler OPFS call than the sync access handle)
-// to read the finished file back as a `Blob` for `collectDownloads()`. Not
+// The real per-file backing store for `FallbackSink`: the OPFS root
+// directory's own `getFileHandle()`/`removeEntry()`, structurally narrowed
+// the same way `opfsAudio.ts` narrows its Worker-side Andockpunkt. Not
 // reachable from any test — no OPFS in Node/Vitest (same Realitätsgrenze as
-// `opfsAudio.ts`).
-
-interface FallbackOpfsFileHandleLike {
-  createSyncAccessHandle(): Promise<SyncAccessHandleLike>;
-  getFile(): Promise<Blob>;
-}
+// `opfsAudio.ts`); real OPFS `createWritable()` throughput/crash behavior is
+// this unit's own documented manual milestone.
 
 interface FallbackOpfsDirectoryLike {
-  getFileHandle(name: string, options?: { create?: boolean }): Promise<FallbackOpfsFileHandleLike>;
+  getFileHandle(name: string, options?: { create?: boolean }): Promise<FallbackFileHandle>;
   removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>;
 }
 
@@ -277,9 +450,7 @@ function getOpfsStorage(): { getDirectory(): Promise<FallbackOpfsDirectoryLike> 
 
 async function defaultFallbackFileOpener(name: string): Promise<FallbackFileHandle> {
   const root = await getOpfsStorage().getDirectory();
-  const fileHandle = await root.getFileHandle(name, { create: true });
-  const handle = await fileHandle.createSyncAccessHandle();
-  return { handle, readBlob: () => fileHandle.getFile() };
+  return root.getFileHandle(name, { create: true });
 }
 
 /**
@@ -326,133 +497,6 @@ export async function deleteFallbackArtifacts(): Promise<void> {
 // --- Live-mirror (File System Access) sink ---------------------------------
 
 /**
- * Commit-window thresholds for the live-mirror sink (see file header for the
- * O(n²)-copy rationale). Lean starting guesses — an explicit
- * hardware-milestone tuning point, not calibrated numbers.
- */
-export const DEFAULT_MAX_APPENDS_PER_COMMIT = 8;
-export const DEFAULT_MAX_COMMIT_INTERVAL_MS = 10_000;
-
-export interface LiveMirrorCommitOptions {
-  /** Commit (close + reopen) the current window after this many appends. */
-  maxAppendsPerCommit?: number;
-  /** Commit the current window once this long has passed since it opened, even below the append count. */
-  maxCommitIntervalMs?: number;
-  /** Injected clock (ms) — defaults to `Date.now`; overridden in tests for deterministic window timing. */
-  now?: () => number;
-}
-
-/**
- * Wraps one live-mirror output file. Holds a single writable open across a
- * commit window, writing each `append()` incrementally at the tracked
- * position, and only closes+reopens (the expensive `keepExistingData` copy)
- * once per window — see the file header for the crash-safety-vs-perf
- * trade-off. On any failure (a `write()` or a periodic window `close()`),
- * silently and permanently reroutes this file (and only this file's future
- * writes) to a fallback file opened through `openFallback`, replaying the
- * current uncommitted window's bytes so none are lost — R7's Grenzfall, no
- * thrown error.
- */
-class SelfHealingAppendableFile implements AppendableFile {
-  readonly #fileHandle: FileHandleLike;
-  readonly #openFallback: () => Promise<AppendableFile>;
-  readonly #maxAppends: number;
-  readonly #maxWindowMs: number;
-  readonly #now: () => number;
-
-  #position: number;
-  #writable: WritableFileStreamLike | null = null;
-  #windowOpenedAt = 0;
-  #appendsInWindow = 0;
-  /** Chunks written since the last successful commit — replayed to the fallback if this window fails to commit (R7, no data loss). At most one window's worth. */
-  #uncommitted: Uint8Array[] = [];
-  #degraded: AppendableFile | null = null;
-
-  constructor(
-    fileHandle: FileHandleLike,
-    initialSize: number,
-    openFallback: () => Promise<AppendableFile>,
-    options: LiveMirrorCommitOptions = {},
-  ) {
-    this.#fileHandle = fileHandle;
-    this.#position = initialSize;
-    this.#openFallback = openFallback;
-    this.#maxAppends = options.maxAppendsPerCommit ?? DEFAULT_MAX_APPENDS_PER_COMMIT;
-    this.#maxWindowMs = options.maxCommitIntervalMs ?? DEFAULT_MAX_COMMIT_INTERVAL_MS;
-    this.#now = options.now ?? (() => Date.now());
-  }
-
-  async append(data: Uint8Array): Promise<void> {
-    if (this.#degraded) {
-      await this.#degraded.append(data);
-      return;
-    }
-    // Track for a possible replay-on-degrade BEFORE attempting any FS op, so
-    // a failing write's chunk is included in the fallback replay too.
-    this.#uncommitted.push(data);
-    try {
-      if (!this.#writable) {
-        this.#writable = await this.#fileHandle.createWritable({ keepExistingData: true });
-        this.#windowOpenedAt = this.#now();
-        this.#appendsInWindow = 0;
-      }
-      await this.#writable.write({ type: 'write', position: this.#position, data });
-      this.#position += data.byteLength;
-      this.#appendsInWindow += 1;
-
-      const dueByCount = this.#appendsInWindow >= this.#maxAppends;
-      const dueByAge = this.#now() - this.#windowOpenedAt >= this.#maxWindowMs;
-      if (dueByCount || dueByAge) {
-        await this.#commit();
-      }
-    } catch {
-      await this.#degrade();
-    }
-  }
-
-  async close(): Promise<void> {
-    if (!this.#degraded) {
-      try {
-        await this.#commit(); // final commit of any still-open window
-      } catch {
-        await this.#degrade();
-      }
-    }
-    await this.#degraded?.close();
-  }
-
-  /**
-   * Closes the open window's writable (committing its writes to the real
-   * file durably) and clears the replay buffer. No-op if no window is open.
-   * May throw (a failing `close()`) — the caller degrades in that case.
-   */
-  async #commit(): Promise<void> {
-    const writable = this.#writable;
-    if (!writable) return;
-    this.#writable = null; // dead either way after this; never double-closed on the degrade path
-    await writable.close();
-    this.#uncommitted = []; // reached only on a *successful* close — the window is now durable
-    this.#appendsInWindow = 0;
-  }
-
-  /**
-   * R7 Grenzfall: reroute this file to the fallback and replay every
-   * uncommitted-window chunk into it, so nothing written since the last
-   * successful commit is lost. Idempotent-safe to reach only once (guarded
-   * by the `#degraded` check in `append`/`close`).
-   */
-  async #degrade(): Promise<void> {
-    this.#writable = null;
-    const fallback = await this.#openFallback();
-    this.#degraded = fallback;
-    for (const chunk of this.#uncommitted) {
-      await fallback.append(chunk);
-    }
-    this.#uncommitted = [];
-  }
-}
-
-/**
  * R5/R6: the Chromium-desktop live-mirror `FileSink`, backed by one
  * `DirectoryHandleLike` chosen up front. All files that degrade mid-session
  * (R7 Grenzfall) share a single lazily created `FallbackSink` instance, so
@@ -485,7 +529,7 @@ export class FileSystemAccessSink implements FileSink {
   }
 
   #openFallbackFile(name: string): Promise<AppendableFile> {
-    if (!this.#fallback) this.#fallback = new FallbackSink(this.#fallbackFileOpener);
+    if (!this.#fallback) this.#fallback = new FallbackSink(this.#fallbackFileOpener, this.#commitOptions);
     return this.#fallback.openFile(name);
   }
 
@@ -632,7 +676,7 @@ export interface FileSinkDependencies {
   repository?: DirectoryHandleRepository;
   /** Where a live-mirror file's writes go once it degrades — defaults to a real OPFS-backed fallback. */
   fallbackFileOpener?: FallbackFileOpener;
-  /** Live-mirror commit-window tuning (see `LiveMirrorCommitOptions`) — defaults apply if omitted. */
+  /** Commit-window tuning (see `LiveMirrorCommitOptions`), shared by the live-mirror sink AND the fallback sink — defaults apply if omitted. */
   commitOptions?: LiveMirrorCommitOptions;
 }
 
@@ -658,7 +702,7 @@ async function ensureReadWritePermission(dir: DirectoryHandleLike): Promise<Perm
 export async function createFileSink(deps: FileSinkDependencies = {}): Promise<FileSink> {
   const env = deps.env ?? getGlobalEnv();
   if (!hasFileSystemAccess(env)) {
-    return new FallbackSink(deps.fallbackFileOpener);
+    return new FallbackSink(deps.fallbackFileOpener, deps.commitOptions);
   }
   const dir = await env.showDirectoryPicker!();
   const repository = deps.repository ?? getDefaultRepository();
@@ -685,7 +729,7 @@ export async function restoreFileSink(deps: FileSinkDependencies = {}): Promise<
 
   const permission = await ensureReadWritePermission(dir);
   if (permission !== 'granted') {
-    return new FallbackSink(deps.fallbackFileOpener);
+    return new FallbackSink(deps.fallbackFileOpener, deps.commitOptions);
   }
   return new FileSystemAccessSink(dir, deps.fallbackFileOpener, deps.commitOptions);
 }

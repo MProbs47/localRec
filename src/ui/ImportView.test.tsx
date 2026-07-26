@@ -149,9 +149,7 @@ describe('ImportView', () => {
         <ImportView onFileSelected={() => {}} hasOutputTarget onChooseFolder={() => {}} sinkIsFallback />,
       );
       expect(
-        getByText(
-          "Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Transkription wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit.",
-        ),
+        getByText('Kein direkter Ordner-Zugriff in diesem Browser — die Dateien gibt es am Ende als Download.'),
       ).not.toBeNull();
     });
 

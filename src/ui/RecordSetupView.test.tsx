@@ -51,9 +51,7 @@ describe('RecordSetupView — Firefox/Safari fallback-honesty fix', () => {
       <RecordSetupView hasOutputTarget outputName={null} onChooseFolder={() => {}} sinkIsFallback />,
     );
     expect(
-      getByText(
-        'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Aufnahme wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit. Mikrofon freigegeben.',
-      ),
+      getByText('Kein direkter Ordner-Zugriff in diesem Browser — die Dateien gibt es am Ende als Download. Mikrofon freigegeben.'),
     ).not.toBeNull();
     expect(queryByText('Speicherort gewählt. Mikrofon freigegeben.')).toBeNull();
   });
@@ -68,6 +66,6 @@ describe('RecordSetupView — Firefox/Safari fallback-honesty fix', () => {
       <RecordSetupView hasOutputTarget outputName="Testordner" onChooseFolder={() => {}} sinkIsFallback />,
     );
     expect(queryByText(/Speicherort: Testordner/)).toBeNull();
-    expect(getByText(/keinen direkten Ordner-Zugriff/)).not.toBeNull();
+    expect(getByText(/direkter Ordner-Zugriff/)).not.toBeNull();
   });
 });

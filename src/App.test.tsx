@@ -1005,9 +1005,7 @@ describe('Firefox/Safari fallback-honesty fix', () => {
 
     // The honest fallback note, not the old dishonest default.
     expect(
-      screen.getByText(
-        'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Aufnahme wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit. Mikrofon freigegeben.',
-      ),
+      screen.getByText('Kein direkter Ordner-Zugriff in diesem Browser — die Dateien gibt es am Ende als Download. Mikrofon freigegeben.'),
     ).toBeInTheDocument();
     expect(screen.queryByText('Speicherort gewählt. Mikrofon freigegeben.')).not.toBeInTheDocument();
     // `Steps` (footer) tells the same honest story, not "Speicherort gesetzt".

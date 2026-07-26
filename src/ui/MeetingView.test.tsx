@@ -48,9 +48,7 @@ describe('MeetingView — Firefox/Safari fallback-honesty fix', () => {
       <MeetingView hasOutputTarget onChooseFolder={() => {}} hint={null} sinkIsFallback />,
     );
     expect(
-      getByText(
-        'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Aufnahme wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit.',
-      ),
+      getByText('Kein direkter Ordner-Zugriff in diesem Browser — die Dateien gibt es am Ende als Download.'),
     ).not.toBeNull();
     // The headphones aside is unrelated and still renders alongside it.
     expect(getByText(/Kopfhörer empfohlen/)).not.toBeNull();

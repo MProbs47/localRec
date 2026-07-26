@@ -7,7 +7,6 @@
 // milestone.
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
-import type { SyncAccessHandleLike } from '../storage/opfsAudio';
 import {
   createFileSink,
   deleteFallbackArtifacts,
@@ -50,16 +49,29 @@ const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
  * writes are therefore invisible in `bytes` until their window is closed —
  * exactly why a mid-window degrade must replay the uncommitted bytes to the
  * fallback (they never reached the real file).
+ *
+ * Implements `FallbackFileHandle` (not just `FileHandleLike`) so this ONE
+ * fake serves both the live-mirror sink's file handle AND the fallback
+ * sink's OPFS-root file handle — exactly like production, where a single
+ * real `FileSystemFileHandle` (be it FSA-picker- or OPFS-root-sourced)
+ * satisfies both structurally (see `fileSink.ts`'s header). `getFile()`
+ * returns a real `Blob`, which already has `.size`, so it satisfies
+ * `FileHandleLike.getFile()`'s narrower `{size}` contract too.
  */
-class FakeFileHandle implements FileHandleLike {
+class FakeFileHandle implements FallbackFileHandle {
   #committed = new Uint8Array(0);
   writesLog: { position: number; length: number }[] = [];
   createWritableCalls = 0;
   failNextWrite = false;
   failNextClose = false;
 
-  async getFile(): Promise<{ size: number }> {
-    return { size: this.#committed.length };
+  async getFile(): Promise<Blob> {
+    // `.slice().buffer` cast to plain `ArrayBuffer`: TS 7's generic
+    // `Uint8Array<ArrayBufferLike>` (from `#committed`'s `new Uint8Array(0)`
+    // literal) isn't structurally assignable to `BlobPart`'s stricter
+    // `ArrayBufferView<ArrayBuffer>` — a test-only typing wrinkle, not a
+    // runtime concern (a fresh standalone copy either way).
+    return new Blob([this.#committed.slice().buffer as ArrayBuffer]);
   }
 
   async createWritable(options: { keepExistingData: boolean }): Promise<WritableFileStreamLike> {
@@ -133,61 +145,22 @@ class FakeDirectoryHandle implements DirectoryHandleLike {
   }
 }
 
-// --- Fakes: OPFS fallback side (same pattern as opfsAudio.test.ts's FakeSyncAccessHandle) ---
+// --- Fakes: OPFS fallback side --------------------------------------------
+//
+// Reuses the SAME `FakeFileHandle` as the live-mirror side above (no second
+// fake) — proving, at the test level, the exact structural reuse the
+// production code relies on: one `FileHandleLike`-shaped fake backs both
+// the live-mirror file and the fallback's OPFS-root file.
 
-class FakeSyncAccessHandle implements SyncAccessHandleLike {
-  #buffer = new Uint8Array(0);
-  flushCount = 0;
-  closed = false;
-
-  getSize(): number {
-    return this.#buffer.length;
-  }
-
-  write(buffer: ArrayBuffer, options: { at: number }): number {
-    const incoming = new Uint8Array(buffer);
-    const end = options.at + incoming.length;
-    if (end > this.#buffer.length) {
-      const grown = new Uint8Array(end);
-      grown.set(this.#buffer);
-      this.#buffer = grown;
-    }
-    this.#buffer.set(incoming, options.at);
-    return incoming.length;
-  }
-
-  flush(): void {
-    this.flushCount++;
-  }
-
-  close(): void {
-    this.closed = true;
-  }
-
-  get bytes(): Uint8Array {
-    return this.#buffer;
-  }
-}
-
-function fakeFallbackFileOpener(): { opener: FallbackFileOpener; handles: Map<string, FakeSyncAccessHandle> } {
-  const handles = new Map<string, FakeSyncAccessHandle>();
+function fakeFallbackFileOpener(): { opener: FallbackFileOpener; handles: Map<string, FakeFileHandle> } {
+  const handles = new Map<string, FakeFileHandle>();
   const opener: FallbackFileOpener = async (name) => {
     let handle = handles.get(name);
     if (!handle) {
-      handle = new FakeSyncAccessHandle();
+      handle = new FakeFileHandle();
       handles.set(name, handle);
     }
-    const fixedHandle = handle;
-    const fallbackHandle: FallbackFileHandle = {
-      handle: fixedHandle,
-      // `.slice().buffer` cast to plain `ArrayBuffer`: TS 7's generic
-      // `Uint8Array<ArrayBufferLike>` (from `#buffer`'s `new Uint8Array(0)`
-      // literal) isn't structurally assignable to `BlobPart`'s stricter
-      // `ArrayBufferView<ArrayBuffer>` — a test-only typing wrinkle, not a
-      // runtime concern (a fresh standalone copy either way).
-      readBlob: async () => new Blob([fixedHandle.bytes.slice().buffer as ArrayBuffer]),
-    };
-    return fallbackHandle;
+    return handle;
   };
   return { opener, handles };
 }
@@ -564,6 +537,17 @@ describe('R7 Grenzfall: revoked permission -> clean fallback, no data loss', () 
 
 // ============================================================================
 // FallbackSink itself: durable per-file storage + end-of-session download.
+// Now backed by the SAME commit-window `SelfHealingAppendableFile` writer as
+// the live-mirror (see fileSink.ts's header for why — `createSyncAccessHandle`
+// is Worker-only, `FallbackSink` runs on the main thread) — so, exactly like
+// the live-mirror's `bytes`/`getFile().size`, a file's committed content is
+// only visible once its current window is committed (`close()`, or the
+// count/age threshold). Production always `close()`s every writer before
+// ever reading `collectDownloads()`/`collectFallbackDownloads()`
+// (`RecordingCoordinator.stop()` awaits every writer's `close()` first — see
+// that file), so these tests `close()` before asserting on collected bytes,
+// matching the real call order rather than the old (pre-fix) sync-handle
+// behavior where every write was immediately durable.
 // ============================================================================
 
 describe('FallbackSink (R7/AE1: internal crash-safe collection + end-of-session download)', () => {
@@ -575,14 +559,17 @@ describe('FallbackSink (R7/AE1: internal crash-safe collection + end-of-session 
     expect(a).toBe(b);
   });
 
-  it('collectDownloads() returns every written file as a Blob with the correct bytes', async () => {
+  it('collectDownloads() returns every written (and closed) file as a Blob with the correct bytes', async () => {
     const { opener } = fakeFallbackFileOpener();
     const sink = new FallbackSink(opener);
 
     const txt = await sink.openFile('session.txt');
     await txt.append(encode('hello world'));
+    await txt.close(); // commits the still-open window — see describe-block note
+
     const srt = await sink.openFile('session.srt');
     await srt.append(encode('1\n00:00:00,000 --> 00:00:01,000\nhi\n'));
+    await srt.close();
 
     const downloads = await sink.collectDownloads();
     expect(decode(new Uint8Array(await downloads.get('session.txt')!.arrayBuffer()))).toBe('hello world');
@@ -595,18 +582,40 @@ describe('FallbackSink (R7/AE1: internal crash-safe collection + end-of-session 
     expect((await sink.collectDownloads()).size).toBe(0);
   });
 
-  it('append writes durably through the reused OpfsAudioAppender position/flush logic (multiple chunks concatenate correctly)', async () => {
+  it('append writes durably through the reused commit-window writer (multiple chunks concatenate correctly, once closed)', async () => {
     const { opener, handles } = fakeFallbackFileOpener();
     const sink = new FallbackSink(opener);
     const file = await sink.openFile('audio.webm');
 
     await file.append(new Uint8Array([1, 2, 3]));
     await file.append(new Uint8Array([4, 5]));
-    await file.close();
+    await file.close(); // commits the window — the OPFS-root fake file now holds both chunks
 
     const handle = handles.get('audio.webm')!;
     expect(Array.from(handle.bytes)).toEqual([1, 2, 3, 4, 5]);
-    expect(handle.closed).toBe(true);
+  });
+
+  it('holds ONE writable open across a commit window on the fallback too — the same O(n^2)-copy fix applies here', async () => {
+    const { opener, handles } = fakeFallbackFileOpener();
+    const sink = new FallbackSink(opener, commitByCountOnly(8));
+    const file = await sink.openFile('session.txt');
+
+    for (let i = 0; i < 7; i++) await file.append(encode('x')); // 7 < 8 -> all in one window
+    const handle = handles.get('session.txt')!;
+    expect(handle.createWritableCalls).toBe(1);
+
+    await file.close();
+    expect(decode(handle.bytes)).toBe('xxxxxxx');
+  });
+
+  it('a write failure on the fallback propagates to the caller — there is nowhere further to degrade to', async () => {
+    const { opener, handles } = fakeFallbackFileOpener();
+    const sink = new FallbackSink(opener);
+    const file = await sink.openFile('session.txt');
+    const handle = handles.get('session.txt')!;
+
+    handle.failNextWrite = true;
+    await expect(file.append(encode('boom'))).rejects.toThrow();
   });
 });
 

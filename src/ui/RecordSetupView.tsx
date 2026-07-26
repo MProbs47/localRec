@@ -65,7 +65,12 @@ export function RecordSetupView({
   return (
     <div className="setup-view" data-status="ready">
       <p className="setup-view__message">{t('setup.readyMessage')}</p>
-      <p className="setup-view__note">
+      {/* `--wide` (theme.css): the fallback sentence is longer than the short
+          "Speicherort …" receipt line the 42ch cap was tuned for — scoped to
+          this case only so it doesn't wrap into the fixed-height `.screen`
+          box and push the consent sentence/`LanguageSelect` out of view
+          (owner-reported bug, 2026-07-26 hardware test). */}
+      <p className={sinkIsFallback ? 'setup-view__note setup-view__note--wide' : 'setup-view__note'}>
         {sinkIsFallback
           ? t('setup.readyNoteFallback')
           : outputName
