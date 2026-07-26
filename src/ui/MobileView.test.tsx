@@ -7,9 +7,10 @@
  * schnell ein Link" still verloren, und ein `<button>` auf dieser Seite
  * bedeutet, dass ein Telefon in `App` gerät.
  *
- * Ausserdem geprüft: die Kopie ist wirklich die WIEDERVERWENDETE (`info.what*`,
- * `header.subtitle*`), nicht eine zweite Fassung derselben Sätze, die
- * auseinanderlaufen kann.
+ * Ausserdem geprüft: Marke und Untertitel sind wirklich die WIEDERVERWENDETEN
+ * (`header.subtitle*`) und keine zweite Fassung, die auseinanderlaufen kann —
+ * und umgekehrt, dass die drei Sätze des Info-Fensters hier NICHT stehen. Sie
+ * sind aus der laufenden App heraus geschrieben und auf dieser Seite unwahr.
  *
  * NICHT geprüft: Geometrie und Lesbarkeit — die leben in `mobile.css`, und
  * jsdom rechnet kein Layout (dieselbe Grenze, die `RecordButton.test.tsx`
@@ -78,11 +79,20 @@ describe('MobileView', () => {
     expect(screen.getByText(de['header.subtitleFlightMode'])).toBeInTheDocument();
   });
 
-  it('zeigt als drei Fakten die bestehenden Info-Sätze, nicht neu getextete', () => {
+  it('zeigt die zwei eigenen Fakten — und keinen Satz aus dem Info-Fenster', () => {
     render(<MobileView />);
 
+    expect(screen.getByText(de['mobile.fact1'])).toBeInTheDocument();
+    expect(screen.getByText(de['mobile.fact2'])).toBeInTheDocument();
+
+    // Owner-Korrektur (2026-07-26), und der Grund, warum das hier ein Test ist:
+    // diese drei Sätze sind aus der laufenden App heraus geschrieben («rechnen
+    // alle hier, auf diesem Gerät», «die Dateien im Ordner, den du gewählt
+    // hast»). Auf einer Seite, die nichts aufnimmt und keinen Ordner kennt,
+    // sind sie unwahr — und genau so eine Wiederverwendung sieht beim nächsten
+    // Mal wieder verlockend aus.
     for (const key of ['info.what1', 'info.what3', 'info.what4'] as const) {
-      expect(screen.getByText(de[key])).toBeInTheDocument();
+      expect(screen.queryByText(de[key])).not.toBeInTheDocument();
     }
   });
 });

@@ -244,4 +244,10 @@ export const de: Record<StringKey, string> = {
   'mobile.runsOnDesktopLabel': 'Am Computer öffnen',
   'mobile.runsOnDesktopBody':
     'Die Transkription rechnet auf deinem Gerät und braucht dafür einen Computer mit Chrome oder Edge. Das Modell lädt dort einmalig ~1.5 GB, danach läuft alles offline.',
+  // Die zwei Fakten — siehe den Kommentar in `en`: bewusst NICHT mehr
+  // `info.what1`/`info.what3`, weil die aus der laufenden App heraus
+  // geschrieben sind.
+  'mobile.fact1': 'localRec nimmt auf, wenn du bereit bist — direkt auf deinem Gerät.',
+  'mobile.fact2':
+    'Aufnahme, Transkription und Sprecher-Erkennung rechnen alle auf deinem Gerät — nichts wird hochgeladen, es gibt keine Konten und keine Auswertung.',
 };

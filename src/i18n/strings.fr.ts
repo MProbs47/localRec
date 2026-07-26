@@ -270,4 +270,7 @@ export const fr: Record<StringKey, string> = {
   'mobile.runsOnDesktopLabel': 'À ouvrir sur ordinateur',
   'mobile.runsOnDesktopBody':
     "La transcription est calculée sur ton appareil, et cela demande un ordinateur avec Chrome ou Edge. Le modèle s'y télécharge une seule fois, environ 1,5 Go, puis tout fonctionne hors ligne.",
+  'mobile.fact1': 'localRec enregistre quand tu es prêt — directement sur ton appareil.',
+  'mobile.fact2':
+    "Enregistrement, transcription et détection des locuteurs sont calculés sur ton appareil — rien n'est envoyé sur internet, il n'y a pas de comptes et aucune analyse.",
 };

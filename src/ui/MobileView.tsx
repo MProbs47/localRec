@@ -29,11 +29,17 @@ import './mobile.css';
  *   - Vom Telefon führt kein Weg in die Aufnahme. Wer es doch versuchen will,
  *     braucht „Desktop-Website" im Browsermenü.
  *
- * Kopie: fast alles ist bestehender Text — Wortmarke und die zwei
- * Untertitelzeilen des Geräts, die vier Zeilen der Tippschleife, und als die
- * drei Fakten `info.what1/3/4` aus dem Info-Fenster (dort schon in fünf
- * Sprachen und in der Stimme des Owners geschrieben). Neu getextet ist nur der
- * Hinweis, wo das Werkzeug läuft.
+ * Kopie: Wortmarke und die zwei Untertitelzeilen kommen wörtlich vom Gerät, die
+ * vier Zeilen der Tippschleife ebenso.
+ *
+ * Die zwei Fakten und der Hinweis sind eigene Schlüssel (`mobile.*`) — und das
+ * ist eine Korrektur (Owner, 2026-07-26): zuerst standen hier `info.what1/3/4`
+ * aus dem Info-Fenster, aber die sind aus der LAUFENDEN App heraus geschrieben
+ * («rechnen alle hier, auf diesem Gerät», «die Dateien im Ordner, den du
+ * gewählt hast») und auf einer Seite, die nichts aufnimmt und keinen Ordner
+ * kennt, sind sie falsch. `info.what4` fällt darum ganz weg statt umformuliert
+ * zu werden. Das Info-Fenster am Desktop behält seinen Text unverändert: dort
+ * stimmt er.
  */
 export function MobileView() {
   return (
@@ -64,9 +70,8 @@ export function MobileView() {
       </section>
 
       <ul className="mobile__facts">
-        <li className="mobile__fact">{t('info.what1')}</li>
-        <li className="mobile__fact">{t('info.what3')}</li>
-        <li className="mobile__fact">{t('info.what4')}</li>
+        <li className="mobile__fact">{t('mobile.fact1')}</li>
+        <li className="mobile__fact">{t('mobile.fact2')}</li>
       </ul>
     </main>
   );

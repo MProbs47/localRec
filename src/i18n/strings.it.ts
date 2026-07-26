@@ -265,4 +265,7 @@ export const it: Record<StringKey, string> = {
   'mobile.runsOnDesktopLabel': 'Da aprire sul computer',
   'mobile.runsOnDesktopBody':
     'La trascrizione viene calcolata sul tuo dispositivo, e per questo serve un computer con Chrome o Edge. Il modello si scarica lì una volta sola, circa 1,5 GB, poi tutto funziona offline.',
+  'mobile.fact1': 'localRec registra quando sei pronto — direttamente sul tuo dispositivo.',
+  'mobile.fact2':
+    "Registrazione, trascrizione e rilevamento dei parlanti vengono elaborati tutti sul tuo dispositivo — niente viene caricato, non ci sono account e non c'è nessuna analisi dei dati.",
 };

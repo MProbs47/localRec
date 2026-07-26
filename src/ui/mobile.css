@@ -135,9 +135,9 @@
   color: var(--ink);
 }
 
-/* ── Die drei Fakten: Haarlinien-Liste, ohne Nummern ─────────────────────
+/* ── Die zwei Fakten: Haarlinien-Liste, ohne Nummern ─────────────────────
    Bewusst nicht 01/02/03 wie die Schrittliste am Gerät: das dort IST eine
-   Reihenfolge (Ordner → Knopf → Sprecher), das hier sind drei gleichrangige
+   Reihenfolge (Ordner → Knopf → Sprecher), das hier sind gleichrangige
    Aussagen. Eine Nummer würde eine Abfolge behaupten, die es nicht gibt. */
 .mobile__facts {
   list-style: none;

@@ -355,4 +355,14 @@ export const en = {
   'mobile.runsOnDesktopLabel': 'Open it on a computer',
   'mobile.runsOnDesktopBody':
     'Transcription runs on your own device, and that takes a computer with Chrome or Edge. The model downloads once there, about 1.5 GB, and everything runs offline after that.',
+  // The two facts. Owner correction (2026-07-26): these deliberately do NOT
+  // reuse `info.what1`/`info.what3` from the info window any more. Those are
+  // written from INSIDE the running app — "right here, on this device", and a
+  // present tense that says it is happening now — and both are wrong on a page
+  // that records nothing. `info.what4` ("the files in the folder you chose")
+  // is dropped outright: there is no folder here. Not duplicated copy; a
+  // different statement for a different place.
+  'mobile.fact1': "localRec records when you're ready — directly on your own device.",
+  'mobile.fact2':
+    'Recording, transcription, and speaker detection all run on your own device — nothing is uploaded, there are no accounts, and no analytics.',
 } satisfies Record<string, string>;
