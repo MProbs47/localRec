@@ -62,6 +62,8 @@ export interface ImportViewProps {
   onChooseFolder: () => void;
   /** The shared transcription-language dropdown (`LanguageSelect`, owned by App) — rendered once the folder is set. */
   languageControl?: React.ReactNode;
+  /** Firefox/Safari fallback-honesty fix — see `RecordSetupView.tsx`'s prop doc, same meaning here. */
+  sinkIsFallback?: boolean;
 }
 
 export function ImportView({
@@ -70,6 +72,7 @@ export function ImportView({
   hasOutputTarget,
   onChooseFolder,
   languageControl,
+  sinkIsFallback = false,
 }: ImportViewProps) {
   const [picking, setPicking] = useState(false);
   const [selected, setSelected] = useState<PickedAudioFile | null>(null);
@@ -111,6 +114,9 @@ export function ImportView({
   return (
     <div className="import-view" data-status={picking ? 'picking' : 'idle'}>
       <p className="import-view__message">{t('import.message')}</p>
+      {/* Firefox/Safari fallback-honesty fix: shown instead of trusting a
+          silently-resolved OPFS fallback to read like a real chosen folder. */}
+      {sinkIsFallback && <p className="import-view__selected">{t('import.fallbackNote')}</p>}
       <button type="button" className="import-view__action" onClick={() => void handlePick()} disabled={picking}>
         {t('import.pickFile')}
       </button>

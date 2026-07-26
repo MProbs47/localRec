@@ -232,6 +232,28 @@ export const it: Record<StringKey, string> = {
   'info.disclaimerText':
     "localRec è uno strumento privato e viene fornito così com'è. Trascrizione e rilevamento dei parlanti nascono in modo automatico e possono contenere errori — verifica ciò che per te è importante. Nessuno può rispondere di danni o di cose sfuggite.",
 
+  // --- Correzione onestà fallback Firefox/Safari (`RecordSetupView.tsx`/
+  // `MeetingView.tsx`/`ImportView.tsx`/`Steps.tsx`/`StoppedScreen.tsx`) -----
+  // Bug segnalato dal proprietario: Firefox non ha la File System Access
+  // API, quindi `createFileSink()` (`fileSink.ts`) risolve sempre nel
+  // `FallbackSink` OPFS, senza mai mostrare un selettore di cartella. Le
+  // schermate di setup leggevano questo esattamente come una cartella
+  // scelta ("Speicherort gewählt"), e i file risultanti non avevano più
+  // modo di uscire dal browser. Queste chiavi sostituiscono quel testo
+  // non veritiero ovunque `sinkIsFallback` sia vero (App.tsx) e aggiungono
+  // la possibilità di scaricare i file a fine sessione su `StoppedScreen`.
+  'setup.readyNoteFallback':
+    "Questo browser non consente l'accesso diretto a una cartella — la registrazione viene conservata in modo sicuro nel browser; alla fine i file sono pronti per il download. Microfono consentito.",
+  'meeting.fallbackNote':
+    "Questo browser non consente l'accesso diretto a una cartella — la registrazione viene conservata in modo sicuro nel browser; alla fine i file sono pronti per il download.",
+  'import.fallbackNote':
+    "Questo browser non consente l'accesso diretto a una cartella — la trascrizione viene conservata in modo sicuro nel browser; alla fine i file sono pronti per il download.",
+  'steps.locationFallback': 'Nessun accesso alla cartella — salvato nel browser',
+  'steps.savedFallback': 'Salvato nel browser — download qui sotto',
+  'stopped.downloadsHeading': 'Scarica i file',
+  'stopped.downloadsNote':
+    "Questo browser non consente l'accesso diretto a una cartella, quindi non è stato scritto nulla automaticamente su disco — la registrazione è conservata in modo sicuro nel browser. Scaricala qui:",
+
   // --- U6 (`RecordSetupView.tsx`/`MeetingView.tsx`) — avviso sul consenso --
   // Vera traduzione dal tedesco (`strings.de.ts`), stessa struttura a due
   // frasi separate dai due punti. Nessun articolo di legge, nessuna formula

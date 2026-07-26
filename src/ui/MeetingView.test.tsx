@@ -41,3 +41,23 @@ describe('MeetingView — consent note (U6)', () => {
     ).not.toBeNull();
   });
 });
+
+describe('MeetingView — Firefox/Safari fallback-honesty fix', () => {
+  it('shows the fallback note when sinkIsFallback is true, alongside the usual aside', () => {
+    const { getByText } = render(
+      <MeetingView hasOutputTarget onChooseFolder={() => {}} hint={null} sinkIsFallback />,
+    );
+    expect(
+      getByText(
+        'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Aufnahme wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit.',
+      ),
+    ).not.toBeNull();
+    // The headphones aside is unrelated and still renders alongside it.
+    expect(getByText(/Kopfhörer empfohlen/)).not.toBeNull();
+  });
+
+  it('does not show the fallback note when sinkIsFallback is false (default)', () => {
+    const { queryByText } = render(<MeetingView hasOutputTarget onChooseFolder={() => {}} hint={null} />);
+    expect(queryByText(/keinen direkten Ordner-Zugriff/)).toBeNull();
+  });
+});

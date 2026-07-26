@@ -236,6 +236,29 @@ export const fr: Record<StringKey, string> = {
   'info.disclaimerText':
     'localRec est un outil privé, fourni tel quel. La transcription et la détection des locuteurs sont produites par une machine et peuvent contenir des erreurs — vérifie ce qui compte pour toi. Personne ne peut répondre des dommages ni de ce qui aurait été manqué.',
 
+  // --- Correction d'honnêteté du repli Firefox/Safari (`RecordSetupView.tsx`/
+  // `MeetingView.tsx`/`ImportView.tsx`/`Steps.tsx`/`StoppedScreen.tsx`) -----
+  // Bug signalé par le propriétaire : Firefox n'a pas la File System Access
+  // API, donc `createFileSink()` (`fileSink.ts`) y résout toujours vers le
+  // `FallbackSink` OPFS, sans jamais afficher de sélecteur de dossier. Les
+  // écrans de configuration lisaient cela exactement comme un dossier
+  // choisi (« Speicherort gewählt »), et les fichiers produits n'avaient
+  // plus aucun moyen de sortir du navigateur. Ces clés remplacent ce texte
+  // malhonnête partout où `sinkIsFallback` est vrai (App.tsx) et ajoutent
+  // la possibilité de télécharger les fichiers en fin de session sur
+  // `StoppedScreen`.
+  'setup.readyNoteFallback':
+    "Ce navigateur n'autorise pas l'accès direct à un dossier — l'enregistrement est conservé en sécurité dans le navigateur ; les fichiers seront proposés au téléchargement à la fin. Microphone autorisé.",
+  'meeting.fallbackNote':
+    "Ce navigateur n'autorise pas l'accès direct à un dossier — l'enregistrement est conservé en sécurité dans le navigateur ; les fichiers seront proposés au téléchargement à la fin.",
+  'import.fallbackNote':
+    "Ce navigateur n'autorise pas l'accès direct à un dossier — la transcription est conservée en sécurité dans le navigateur ; les fichiers seront proposés au téléchargement à la fin.",
+  'steps.locationFallback': "Pas d'accès au dossier — conservé dans le navigateur",
+  'steps.savedFallback': 'Enregistré dans le navigateur — téléchargement ci-dessous',
+  'stopped.downloadsHeading': 'Télécharger les fichiers',
+  'stopped.downloadsNote':
+    "Ce navigateur n'autorise pas l'accès direct à un dossier, rien n'a donc été écrit automatiquement sur le disque — l'enregistrement est conservé en sécurité dans le navigateur. Télécharge-le ici :",
+
   // --- U6 (`RecordSetupView.tsx`/`MeetingView.tsx`) — note de consentement -
   // Vraie traduction de l'allemand (`strings.de.ts`), même structure en deux
   // membres séparés par le deux-points. Aucun article de loi, aucune formule

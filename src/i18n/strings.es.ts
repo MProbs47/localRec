@@ -233,6 +233,30 @@ export const es: Record<StringKey, string> = {
   'info.disclaimerText':
     'localRec es una herramienta privada y se ofrece tal como está. La transcripción y la detección de hablantes se generan de forma automática y pueden contener errores — comprueba lo que te importe. Nadie puede responder por daños ni por lo que se haya pasado por alto.',
 
+  // --- Corrección de honestidad del fallback Firefox/Safari
+  // (`RecordSetupView.tsx`/`MeetingView.tsx`/`ImportView.tsx`/`Steps.tsx`/
+  // `StoppedScreen.tsx`) -----------------------------------------------------
+  // Error reportado por el propietario: Firefox no tiene la File System
+  // Access API, así que `createFileSink()` (`fileSink.ts`) siempre resuelve
+  // ahí al `FallbackSink` de OPFS, sin mostrar nunca un selector de
+  // carpeta. Las pantallas de configuración leían eso exactamente como una
+  // carpeta elegida ("Speicherort gewählt"), y los archivos resultantes ya
+  // no tenían forma de salir del navegador. Estas claves sustituyen ese
+  // texto poco honesto allí donde `sinkIsFallback` es verdadero (App.tsx) y
+  // añaden la posibilidad de descargar los archivos al final de la sesión
+  // en `StoppedScreen`.
+  'setup.readyNoteFallback':
+    'Este navegador no permite el acceso directo a una carpeta — la grabación se guarda de forma segura en el navegador; al final los archivos quedan listos para descargar. Micrófono permitido.',
+  'meeting.fallbackNote':
+    'Este navegador no permite el acceso directo a una carpeta — la grabación se guarda de forma segura en el navegador; al final los archivos quedan listos para descargar.',
+  'import.fallbackNote':
+    'Este navegador no permite el acceso directo a una carpeta — la transcripción se guarda de forma segura en el navegador; al final los archivos quedan listos para descargar.',
+  'steps.locationFallback': 'Sin acceso a carpeta — guardado en el navegador',
+  'steps.savedFallback': 'Guardado en el navegador — descarga abajo',
+  'stopped.downloadsHeading': 'Descargar archivos',
+  'stopped.downloadsNote':
+    'Este navegador no permite el acceso directo a una carpeta, así que no se escribió nada automáticamente en el disco — la grabación quedó guardada de forma segura en el navegador. Descárgala aquí:',
+
   // --- U6 (`RecordSetupView.tsx`/`MeetingView.tsx`) — aviso de consentimiento
   // Traducción real del alemán (`strings.de.ts`), misma estructura en dos
   // miembros separados por dos puntos. Ningún artículo de ley, ninguna

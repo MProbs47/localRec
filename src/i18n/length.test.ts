@@ -65,6 +65,9 @@ const LAYOUT_CRITICAL_KEYS: readonly StringKey[] = [
   'steps.meetingTranscribing',
   'steps.recordMeeting',
   'steps.recording',
+  // Firefox/Safari fallback-honesty fix — same `.step` row, same constraint.
+  'steps.locationFallback',
+  'steps.savedFallback',
   // `ModeToggle.tsx` options (`.mode-toggle__option`)
   'mode.record',
   'mode.import',

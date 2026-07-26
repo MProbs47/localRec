@@ -67,10 +67,17 @@
  *    `Comlink.transfer` call exactly, just driven by this adapter's own paced feeder
  *    instead of the live wall-clock interval.
  *
- * Deliberately NOT built here (see this unit's report): a download-the-
- * fallback-files affordance for the non-Chromium `FallbackSink` path --
- * that gap already exists for the recording flow (U9/U12a), import shares
- * it rather than fixing it in isolation.
+ * **Firefox/Safari fallback-honesty fix addendum (owner-reported bug).** The
+ * "download-the-fallback-files affordance" this unit's original report named
+ * as deliberately not built (the gap right above, historically) is now
+ * built: `sinkIsFallback` (state, below) tracks whether the active sink ever
+ * resolved to the OPFS `FallbackSink`/a degraded live-mirror — set at every
+ * `createFileSink()` call site (`prepareRecording`, `handleChooseImportFolder`,
+ * and defensively after each `coordinator.start()`) — and drives (a) honest
+ * "kein Ordner-Zugriff" copy on the three landing screens + `Steps` instead
+ * of the old "Speicherort gewählt" reading, and (b) `collectDownloads` below,
+ * which `StoppedScreen` wires into a download section for every trapped
+ * file. Shared by record, meeting, and import — one fix, not three.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { startOpusRecorder } from './audio/recorder';
@@ -82,7 +89,13 @@ import { RecordingCoordinator, type RecorderStarter } from './session/recordingC
 import { SessionStore, type SessionRecord } from './storage/sessionStore';
 import { findCrashCandidates, recoverSession } from './storage/recovery';
 import { WakeLockController, getBrowserWakeLockProvider } from './runtime/wakeLock';
-import { createFileSink, deleteFallbackArtifacts, type FileSink } from './output/fileSink';
+import {
+  createFileSink,
+  deleteFallbackArtifacts,
+  type FileSink,
+  type FallbackSink,
+  type FileSystemAccessSink,
+} from './output/fileSink';
 import { ModeToggle, type Mode } from './ui/ModeToggle';
 import { ImportView } from './ui/ImportView';
 import { LanguageSelect, type TranscriptionLanguage } from './ui/LanguageSelect';
@@ -165,6 +178,18 @@ export default function App() {
   // The chosen folder's name for the "gespeichert in …" message (§7). Only the
   // name is ever available — the browser never exposes a full path.
   const [outputName, setOutputName] = useState<string | null>(null);
+  // Firefox/Safari fallback-honesty fix (owner-reported bug): true once the
+  // ACTIVE sink resolved to the OPFS `FallbackSink` (`fileSink.ts`'s
+  // `FileSink.kind === 'fallback'`) — no folder picker was ever shown there
+  // (`createFileSink()` feature-detects and returns the fallback straight
+  // away, see that file's header), so `hasOutputTarget=true` must NOT read
+  // as "Speicherort gewählt" on the setup screens/`Steps`. Set at every point
+  // a sink is created/resolved below (`prepareRecording`,
+  // `handleChooseImportFolder`, and defensively after `coordinator.start()`
+  // for the `restoredSinkRef.current ?? createFileSink()` fallback inside
+  // `coordinatorRef`'s `createSink`) — never guessed from `outputName` alone,
+  // which is also `null` on a genuine not-yet-chosen state.
+  const [sinkIsFallback, setSinkIsFallback] = useState(false);
   // U19: landing-page mode switch (IM-2). Default 'record' — the existing
   // live path is unaffected by this state existing at all. Plan 003 adds the
   // third value 'meeting' (mic + system audio).
@@ -473,6 +498,10 @@ export default function App() {
         .then(() => {
           setHasOutputTarget(true);
           setOutputName(coordinatorRef.current!.outputName);
+          // Defensive re-check — see `startRecording`'s identical comment
+          // above; covers the import path too (its own sink was already set
+          // by `handleChooseImportFolder`, this just confirms it).
+          setSinkIsFallback(coordinatorRef.current!.sink?.kind === 'fallback');
           setDeviceState('stopped');
           // Phase D (hybrid timing): the import path annotates right away (the
           // user is present); the meeting path parks the audio for the on-demand
@@ -490,6 +519,28 @@ export default function App() {
     },
     [engine, language, runAnnotation],
   );
+
+  // Firefox/Safari fallback-honesty fix (owner-reported bug, the "U9/U12a
+  // gap" this file's own header comment names): the end-of-session download
+  // affordance for a session whose sink never had real folder access.
+  // Reads `coordinatorRef.current?.sink` — the SAME sink instance
+  // `runAnnotation` above writes the post-hoc `-sprecher.*` files through
+  // (`writeSpeakerTranscripts`) — so `StoppedScreen` calling this again
+  // after annotation finishes picks those files up too; it deliberately does
+  // NOT collect once at stop and cache the result (see `StoppedScreen.tsx`'s
+  // `DownloadSection`, which re-collects on every `annotation` change).
+  // Resolves an empty map (rendering no section) for the ordinary
+  // live-mirror case with nothing degraded — `FallbackSink`/
+  // `FileSystemAccessSink` are the only two `FileSink` kinds (`fileSink.ts`),
+  // so the cast after each `kind` check is exhaustive.
+  const collectDownloads = useCallback(async (): Promise<Map<string, Blob>> => {
+    const sink = coordinatorRef.current?.sink;
+    if (!sink) return new Map();
+    if (sink.kind === 'fallback') return (sink as FallbackSink).collectDownloads();
+    const liveMirror = sink as FileSystemAccessSink;
+    if (liveMirror.degraded) return liveMirror.collectFallbackDownloads();
+    return new Map();
+  }, []);
 
   // Phase D (hybrid timing): the on-demand "Sprecher erkennen" trigger. Runs the
   // diarization on the audio parked at stop (live/meeting). Kept available for a
@@ -511,6 +562,7 @@ export default function App() {
         restoredSinkRef.current = sink;
         setHasOutputTarget(true);
         setOutputName(sink.name ?? null);
+        setSinkIsFallback(sink.kind === 'fallback');
       })
       .catch(() => {
         // Picker cancelled or failed — ImportView simply stays on "Ordner
@@ -538,6 +590,7 @@ export default function App() {
     restoredSinkRef.current = sink;
     setHasOutputTarget(true);
     setOutputName(sink.name ?? null);
+    setSinkIsFallback(sink.kind === 'fallback');
     setSetupHint(true);
 
     try {
@@ -785,6 +838,12 @@ export default function App() {
     // the "Speicherort" step and the post-stop "gespeichert in …" message.
     setHasOutputTarget(true);
     setOutputName(coordinatorRef.current!.outputName);
+    // Defensive re-check (usually a no-op — `prepareRecording` above already
+    // set this from the SAME sink via `restoredSinkRef`): covers the
+    // `createSink: async () => restoredSinkRef.current ?? createFileSink()`
+    // fallback branch inside `coordinatorRef`'s deps, in case a session ever
+    // reaches `start()` without a pre-chosen sink.
+    setSinkIsFallback(coordinatorRef.current!.sink?.kind === 'fallback');
 
     engine.startLive(language);
     setElapsedMs(0);
@@ -932,6 +991,8 @@ export default function App() {
       await coordinatorRef.current!.start(startRecorder);
       setHasOutputTarget(true);
       setOutputName(coordinatorRef.current!.outputName);
+      // Defensive re-check — see `startRecording`'s identical comment above.
+      setSinkIsFallback(coordinatorRef.current!.sink?.kind === 'fallback');
       setElapsedMs(0);
       setDeviceState('recording');
     } catch {
@@ -1081,6 +1142,7 @@ export default function App() {
           onAnnotate={handleAnnotate}
           speakerCount={speakerCount}
           onSpeakerCountChange={setSpeakerCount}
+          collectDownloads={collectDownloads}
         />
       );
     }
@@ -1097,6 +1159,7 @@ export default function App() {
           hasOutputTarget={hasOutputTarget}
           onChooseFolder={handleChooseImportFolder}
           languageControl={languageControl}
+          sinkIsFallback={sinkIsFallback}
         />
       );
     }
@@ -1107,6 +1170,7 @@ export default function App() {
           onChooseFolder={handleChooseImportFolder}
           hint={meetingHint}
           languageControl={languageControl}
+          sinkIsFallback={sinkIsFallback}
         />
       );
     // Record mode: after a denied mic, name why the last attempt didn't start
@@ -1121,6 +1185,7 @@ export default function App() {
           outputName={outputName}
           onChooseFolder={() => void prepareRecording()}
           languageControl={languageControl}
+          sinkIsFallback={sinkIsFallback}
         />
       );
     }
@@ -1303,6 +1368,7 @@ export default function App() {
             outputName={outputName}
             mode={mode}
             annotation={annotation}
+            sinkIsFallback={sinkIsFallback}
           />
         </div>
         <div className="foot__right">

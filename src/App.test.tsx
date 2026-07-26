@@ -975,6 +975,78 @@ describe('finding 2: a finished recording still has a way back to a fresh storag
 });
 
 /**
+ * Firefox/Safari fallback-honesty fix (owner-reported bug): Firefox has no
+ * File System Access API, so `createFileSink()` (`fileSink.ts`) always
+ * resolves to the OPFS `FallbackSink` — no folder picker ever shown. Before
+ * this fix, App still read that exactly like a chosen folder
+ * ("Speicherort gewählt" / "Speicherort gesetzt"), and the resulting files
+ * had no way back out of the browser. These tests exercise the two halves of
+ * the fix through the SAME `App` wiring the other tests here drive: (a) the
+ * honest copy on the setup screen + `Steps`, sourced from `sinkIsFallback`;
+ * (b) the end-of-session download section on `StoppedScreen`, sourced from
+ * `collectDownloads` reading `coordinator.sink`.
+ */
+describe('Firefox/Safari fallback-honesty fix', () => {
+  it('shows honest "kein Ordner-Zugriff" copy instead of "Speicherort gewählt" when createFileSink resolves the fallback sink', async () => {
+    createFileSinkMock.mockImplementationOnce(async () => ({
+      kind: 'fallback',
+      name: undefined,
+      openFile: vi.fn(async () => fakeAppendableFile()),
+    }) as never);
+
+    render(<App />);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Modell laden' }));
+    act(() => latestEngine().setStatus('ready', { progress: 1 }));
+    await waitFor(() => expect(deviceState()).toBe('ready'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Speicherort wählen' }));
+    await waitFor(() => expect(getUserMediaMock).toHaveBeenCalled());
+
+    // The honest fallback note, not the old dishonest default.
+    expect(
+      screen.getByText(
+        'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Aufnahme wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit. Mikrofon freigegeben.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Speicherort gewählt. Mikrofon freigegeben.')).not.toBeInTheDocument();
+    // `Steps` (footer) tells the same honest story, not "Speicherort gesetzt".
+    expect(screen.getByText('Kein Ordner-Zugriff — im Browser gespeichert')).toBeInTheDocument();
+    // The record button still unlocks — a fallback sink is fully functional,
+    // only its messaging changed (hasOutputTarget stays true).
+    expect(screen.getByRole('button', { name: 'Aufnahme starten' })).not.toBeDisabled();
+  });
+
+  it('offers a download link for every trapped file once a fallback session stops', async () => {
+    await reachReady();
+
+    const fallbackFiles = new Map<string, Blob>([
+      ['transkript.txt', new Blob(['hallo welt'], { type: 'text/plain' })],
+    ]);
+    // Simulates what the REAL `RecordingCoordinator` retains as `.sink` once
+    // `start()` resolves with a fallback sink (or a live-mirror sink that
+    // degraded mid-session, R7 Grenzfall — same `kind`/shape either way from
+    // `App.tsx`'s `collectDownloads` point of view). Set BEFORE the start
+    // click so it's already in place once `coordinator.start()`'s mock
+    // resolves — matching the real coordinator's own timing.
+    (latestCoordinator() as unknown as { sink: unknown }).sink = {
+      kind: 'fallback',
+      collectDownloads: vi.fn(async () => fallbackFiles),
+    };
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aufnahme starten' }));
+    await waitFor(() => expect(deviceState()).toBe('recording'));
+    fireEvent.click(screen.getByRole('button', { name: 'Aufnahme stoppen' }));
+    await waitFor(() => expect(deviceState()).toBe('stopped'));
+
+    await waitFor(() => expect(screen.getByRole('link', { name: 'transkript.txt' })).toBeInTheDocument());
+    // `Steps`' finalize step matches too: "im Browser gespeichert", not
+    // "Gespeichert in …" (no folder name — nothing was ever chosen).
+    expect(screen.getByText('Im Browser gespeichert — Download unten')).toBeInTheDocument();
+  });
+});
+
+/**
  * U5 (KTD8/KTD9/KTD10, plan `2026-07-25-007`) — the "i" info button next to
  * `LocaleSwitch` and the info view it opens. `InfoView.test.tsx` covers the
  * view's own content (prompts, filenames, KTD10 sentence, copy buttons,

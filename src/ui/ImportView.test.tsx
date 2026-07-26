@@ -142,4 +142,24 @@ describe('ImportView', () => {
       expect(queryByText(/Alle Teilnehmenden wissen von der Aufnahme/)).toBeNull();
     });
   });
+
+  describe('Firefox/Safari fallback-honesty fix', () => {
+    it('shows the fallback note when sinkIsFallback is true, once a folder target exists', () => {
+      const { getByText } = render(
+        <ImportView onFileSelected={() => {}} hasOutputTarget onChooseFolder={() => {}} sinkIsFallback />,
+      );
+      expect(
+        getByText(
+          "Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Transkription wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit.",
+        ),
+      ).not.toBeNull();
+    });
+
+    it('does not show the fallback note when sinkIsFallback is false (default)', () => {
+      const { queryByText } = render(
+        <ImportView onFileSelected={() => {}} hasOutputTarget onChooseFolder={() => {}} />,
+      );
+      expect(queryByText(/keinen direkten Ordner-Zugriff/)).toBeNull();
+    });
+  });
 });

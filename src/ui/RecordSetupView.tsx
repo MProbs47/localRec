@@ -32,12 +32,22 @@ export function RecordSetupView({
   outputName,
   onChooseFolder,
   languageControl,
+  sinkIsFallback = false,
 }: {
   hasOutputTarget: boolean;
   outputName: string | null;
   onChooseFolder: () => void;
   /** The shared transcription-language dropdown (`LanguageSelect`, owned by App) — rendered once the folder is set. */
   languageControl?: React.ReactNode;
+  /**
+   * Firefox/Safari fallback-honesty fix (owner-reported bug): true once the
+   * active sink resolved to the OPFS `FallbackSink` (`fileSink.ts`'s
+   * `FileSink.kind === 'fallback'`) — no folder picker was ever shown, so
+   * `outputName` is `null` for a reason other than a genuine ready-without-
+   * folder gap. When true, the "ready" note below must NOT read like a
+   * folder was chosen (App.tsx tracks this in `sinkIsFallback`).
+   */
+  sinkIsFallback?: boolean;
 }) {
   if (!hasOutputTarget) {
     return (
@@ -56,9 +66,11 @@ export function RecordSetupView({
     <div className="setup-view" data-status="ready">
       <p className="setup-view__message">{t('setup.readyMessage')}</p>
       <p className="setup-view__note">
-        {outputName
-          ? t('setup.readyNoteWithFolder', { folder: outputName })
-          : t('setup.readyNoteDefault')}
+        {sinkIsFallback
+          ? t('setup.readyNoteFallback')
+          : outputName
+            ? t('setup.readyNoteWithFolder', { folder: outputName })
+            : t('setup.readyNoteDefault')}
       </p>
       {/* U6/R11/KTD11: one sentence, no checkbox, no gating — the sentence
           IS the measure. Rendered ONLY here in the `ready` state (folder set,

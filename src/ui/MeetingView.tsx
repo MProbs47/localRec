@@ -18,12 +18,15 @@ export function MeetingView({
   onChooseFolder,
   hint,
   languageControl,
+  sinkIsFallback = false,
 }: {
   hasOutputTarget: boolean;
   onChooseFolder: () => void;
   hint: string | null;
   /** The shared transcription-language dropdown (`LanguageSelect`, owned by App) — rendered once the folder is set. */
   languageControl?: React.ReactNode;
+  /** Firefox/Safari fallback-honesty fix — see `RecordSetupView.tsx`'s prop doc, same meaning here. */
+  sinkIsFallback?: boolean;
 }) {
   if (!hasOutputTarget) {
     return (
@@ -38,6 +41,9 @@ export function MeetingView({
   return (
     <div className="meeting-view" data-status="ready">
       <p className="meeting-view__message">{t('meeting.shareInstruction')}</p>
+      {/* Firefox/Safari fallback-honesty fix: shown instead of trusting a
+          silently-resolved OPFS fallback to read like a real chosen folder. */}
+      {sinkIsFallback && <p className="meeting-view__aside">{t('meeting.fallbackNote')}</p>}
       <p className="meeting-view__aside">{t('meeting.aside')}</p>
       {/* U6/R11/KTD11: same consent sentence as `RecordSetupView`, same
           reasoning — one sentence, no checkbox, no gating, rendered only in

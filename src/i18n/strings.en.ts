@@ -316,6 +316,27 @@ export const en = {
   'info.disclaimerText':
     'localRec is a private tool, provided as-is. The transcript and speaker detection are machine-generated and may contain errors — verify what matters to you. No one is liable for damages or anything missed.',
 
+  // --- Firefox/Safari fallback-honesty fix (`RecordSetupView.tsx`/
+  // `MeetingView.tsx`/`ImportView.tsx`/`Steps.tsx`/`StoppedScreen.tsx`) -----
+  // Owner-reported bug: Firefox has no File System Access API, so
+  // `createFileSink()` (`fileSink.ts`) always resolves to the OPFS
+  // `FallbackSink` with no picker ever shown — but the setup screens used to
+  // read that exactly like a chosen folder ("Speicherort gewählt"), and the
+  // resulting files had no way back out of the browser. These keys replace
+  // that dishonest copy wherever `sinkIsFallback` is true (App.tsx) and add
+  // the end-of-session download affordance on `StoppedScreen`.
+  'setup.readyNoteFallback':
+    'This browser has no direct folder access — the recording is kept safely in the browser; the files are offered for download once it stops. Microphone allowed.',
+  'meeting.fallbackNote':
+    'This browser has no direct folder access — the recording is kept safely in the browser; the files are offered for download once it stops.',
+  'import.fallbackNote':
+    "This browser has no direct folder access — the transcription is kept safely in the browser; the files are offered for download once it's done.",
+  'steps.locationFallback': 'No folder access — kept in the browser',
+  'steps.savedFallback': 'Saved in the browser — download below',
+  'stopped.downloadsHeading': 'Download files',
+  'stopped.downloadsNote':
+    'This browser has no direct folder access, so nothing was written to disk automatically — the recording was kept safely in the browser instead. Download the files here:',
+
   // --- U6 (`RecordSetupView.tsx`/`MeetingView.tsx`) — consent note ---------
   // Rendered ONLY in the `ready` state of both recording paths, right next
   // to the start button (KTD11): the sentence IS the measure — no checkbox,

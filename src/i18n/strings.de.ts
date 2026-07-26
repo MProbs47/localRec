@@ -200,6 +200,28 @@ export const de: Record<StringKey, string> = {
   'info.disclaimerText':
     'localRec ist ein privates Werkzeug und wird so bereitgestellt, wie es ist. Transkript und Sprecher-Erkennung entstehen maschinell und können Fehler enthalten — prüf nach, was dir wichtig ist. Für Schäden oder Verpasstes kann niemand geradestehen.',
 
+  // --- Firefox/Safari-Fallback-Ehrlichkeit (`RecordSetupView.tsx`/
+  // `MeetingView.tsx`/`ImportView.tsx`/`Steps.tsx`/`StoppedScreen.tsx`) -----
+  // Owner-gemeldeter Bug: Firefox hat keine File System Access API, darum
+  // liefert `createFileSink()` (`fileSink.ts`) dort immer den OPFS-
+  // `FallbackSink` — ganz ohne Ordner-Dialog. Die Setup-Screens lasen das
+  // bisher wie einen gewählten Ordner ("Speicherort gewählt"), und die
+  // entstandenen Dateien hatten keinen Weg mehr aus dem Browser hinaus. Diese
+  // Schlüssel ersetzen den unehrlichen Text überall dort, wo `sinkIsFallback`
+  // zutrifft (App.tsx), und ergänzen die Download-Möglichkeit am Ende der
+  // Sitzung auf `StoppedScreen`.
+  'setup.readyNoteFallback':
+    'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Aufnahme wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit. Mikrofon freigegeben.',
+  'meeting.fallbackNote':
+    'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Aufnahme wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit.',
+  'import.fallbackNote':
+    'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Transkription wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit.',
+  'steps.locationFallback': 'Kein Ordner-Zugriff — im Browser gespeichert',
+  'steps.savedFallback': 'Im Browser gespeichert — Download unten',
+  'stopped.downloadsHeading': 'Dateien herunterladen',
+  'stopped.downloadsNote':
+    'Dieser Browser erlaubt keinen direkten Ordner-Zugriff, darum wurde nichts automatisch auf die Festplatte geschrieben — die Aufnahme liegt stattdessen sicher im Browser. Hier herunterladen:',
+
   // --- U6 (`RecordSetupView.tsx`/`MeetingView.tsx`) — Einwilligungs-Hinweis -
   // Deutscher Quelltext verbatim aus dem Plan („Textquellen" →
   // „Einwilligungs-Hinweis (U6)"), nicht selbst formuliert.

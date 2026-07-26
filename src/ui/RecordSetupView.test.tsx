@@ -44,3 +44,30 @@ describe('RecordSetupView — consent note (U6)', () => {
     ).not.toBeNull();
   });
 });
+
+describe('RecordSetupView — Firefox/Safari fallback-honesty fix', () => {
+  it('shows the honest fallback note instead of "Speicherort gewählt" when sinkIsFallback is true', () => {
+    const { getByText, queryByText } = render(
+      <RecordSetupView hasOutputTarget outputName={null} onChooseFolder={() => {}} sinkIsFallback />,
+    );
+    expect(
+      getByText(
+        'Dieser Browser erlaubt keinen direkten Ordner-Zugriff — die Aufnahme wird sicher im Browser aufbewahrt, die Dateien stehen am Ende zum Download bereit. Mikrofon freigegeben.',
+      ),
+    ).not.toBeNull();
+    expect(queryByText('Speicherort gewählt. Mikrofon freigegeben.')).toBeNull();
+  });
+
+  it('keeps the pre-existing "Speicherort gewählt" default when sinkIsFallback is false (default)', () => {
+    const { getByText } = render(<RecordSetupView hasOutputTarget outputName={null} onChooseFolder={() => {}} />);
+    expect(getByText('Speicherort gewählt. Mikrofon freigegeben.')).not.toBeNull();
+  });
+
+  it('prefers the fallback note over a folder name if both were somehow set', () => {
+    const { getByText, queryByText } = render(
+      <RecordSetupView hasOutputTarget outputName="Testordner" onChooseFolder={() => {}} sinkIsFallback />,
+    );
+    expect(queryByText(/Speicherort: Testordner/)).toBeNull();
+    expect(getByText(/keinen direkten Ordner-Zugriff/)).not.toBeNull();
+  });
+});

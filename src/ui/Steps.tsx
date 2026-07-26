@@ -12,6 +12,14 @@ interface StepsProps {
   mode: Mode;
   /** Phase D (U18/U21): the annotate-stage status, so step 03 doesn't show "Fertig ✓" while diarization is still running. */
   annotation: 'idle' | 'running' | 'done' | 'skipped';
+  /**
+   * Firefox/Safari fallback-honesty fix (owner-reported bug): true once the
+   * active sink resolved to the OPFS `FallbackSink` (`fileSink.ts`) — no
+   * folder was actually chosen. Swaps the "Speicherort gesetzt"/"Gespeichert
+   * in …" step wording for an honest "im Browser gespeichert" variant,
+   * before AND after the stop (App.tsx's `sinkIsFallback`).
+   */
+  sinkIsFallback?: boolean;
 }
 
 /**
@@ -33,11 +41,24 @@ interface StepsProps {
  * U8: moved out of `App.tsx` verbatim, together with `StepRow` — this has real
  * checklist logic (computed from state), it is not a pass-through.
  */
-export function Steps({ deviceState, modelReady, hasOutputTarget, finalizing, outputName, mode, annotation }: StepsProps) {
+export function Steps({
+  deviceState,
+  modelReady,
+  hasOutputTarget,
+  finalizing,
+  outputName,
+  mode,
+  annotation,
+  sinkIsFallback = false,
+}: StepsProps) {
   const isImport = mode === 'import';
 
   if (deviceState === 'stopped') {
-    const savedLabel = outputName ? t('steps.savedIn', { folder: outputName }) : t('steps.saved');
+    const savedLabel = sinkIsFallback
+      ? t('steps.savedFallback')
+      : outputName
+        ? t('steps.savedIn', { folder: outputName })
+        : t('steps.saved');
     // Step 03 reflects the annotate stage so it never shows "Fertig ✓" while
     // diarization is still running.
     // The trailing ellipsis is this list's own in-progress typography (see
@@ -71,6 +92,11 @@ export function Steps({ deviceState, modelReady, hasOutputTarget, finalizing, ou
   // first screen, so status only appears from `downloading` onward.
   const showStatus = deviceState !== 'idle';
   const ready = deviceState === 'ready';
+  // Firefox/Safari fallback-honesty fix: the shared "Speicherort" step-02
+  // label once a target IS set — swapped for the honest fallback wording
+  // instead of the folder-implying default, same key across all three modes
+  // (they were already sharing `steps.locationSet` literally).
+  const locationSetLabel = sinkIsFallback ? t('steps.locationFallback') : t('steps.locationSet');
 
   if (isImport) {
     // Import setup + progress: folder is chosen BEFORE the file (decision A),
@@ -81,7 +107,7 @@ export function Steps({ deviceState, modelReady, hasOutputTarget, finalizing, ou
         <StepRow num="01" label={t('steps.modelLoaded')} done={showStatus && modelReady} />
         <StepRow
           num="02"
-          label={showStatus && hasOutputTarget ? t('steps.locationSet') : t('steps.locationChooseFolder')}
+          label={showStatus && hasOutputTarget ? locationSetLabel : t('steps.locationChooseFolder')}
           done={showStatus && hasOutputTarget}
           active={ready && !hasOutputTarget}
         />
@@ -106,7 +132,7 @@ export function Steps({ deviceState, modelReady, hasOutputTarget, finalizing, ou
         <StepRow num="01" label={t('steps.modelLoaded')} done={showStatus && modelReady} />
         <StepRow
           num="02"
-          label={showStatus && hasOutputTarget ? t('steps.locationSet') : t('steps.locationChooseFolder')}
+          label={showStatus && hasOutputTarget ? locationSetLabel : t('steps.locationChooseFolder')}
           done={showStatus && hasOutputTarget}
           active={ready && !hasOutputTarget}
         />
@@ -124,7 +150,7 @@ export function Steps({ deviceState, modelReady, hasOutputTarget, finalizing, ou
       <StepRow num="01" label={t('steps.modelLoaded')} done={showStatus && modelReady} />
       <StepRow
         num="02"
-        label={showStatus && hasOutputTarget ? t('steps.locationSet') : t('steps.locationChooseAtStart')}
+        label={showStatus && hasOutputTarget ? locationSetLabel : t('steps.locationChooseAtStart')}
         done={showStatus && hasOutputTarget}
         active={ready && !hasOutputTarget}
       />

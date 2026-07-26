@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { AlignedSegment } from '../diarization/align';
 import { t } from '../i18n';
 import { LiveTranscript } from './LiveTranscript';
@@ -30,6 +31,20 @@ export interface StoppedScreenProps {
   /** Round 5: the user-stated speaker count (null = automatic) fed to the next run as `knownSpeakerCount`. */
   speakerCount: number | null;
   onSpeakerCountChange: (count: number | null) => void;
+  /**
+   * Firefox/Safari fallback-honesty fix (owner-reported bug, the "U9/U12a
+   * gap" this App.tsx header comment names): collects every file the
+   * session's sink is holding that never reached a real chosen folder —
+   * either the whole session ran on the OPFS `FallbackSink`, or a
+   * live-mirror `FileSystemAccessSink` degraded to it mid-session (R7
+   * Grenzfall). `undefined`/an empty result renders no section at all —
+   * the ordinary case where a real folder was chosen and nothing degraded.
+   * Called again whenever `annotation` changes (see the effect below): the
+   * post-hoc `-sprecher.txt`/`.srt` files (`writeSpeakerTranscripts`, App.tsx)
+   * are written to the SAME sink instance only after annotation finishes, so
+   * a one-shot collection at stop would silently miss them.
+   */
+  collectDownloads?: () => Promise<Map<string, Blob>>;
 }
 
 /**
@@ -56,6 +71,7 @@ export function StoppedScreen({
   onAnnotate,
   speakerCount,
   onSpeakerCountChange,
+  collectDownloads,
 }: StoppedScreenProps) {
   const actionLabel =
     annotation === 'skipped'
@@ -66,6 +82,7 @@ export function StoppedScreen({
 
   return (
     <>
+      <DownloadSection collectDownloads={collectDownloads} annotation={annotation} />
       {/* Hybrid timing: for live/meeting the diarization is on demand — the
           transcript is already saved; this button runs the slow speaker step
           when the user is ready. After a done run the same row stays available
@@ -113,5 +130,71 @@ export function StoppedScreen({
       )}
       {aligned ? <SpeakerView segments={aligned} /> : <LiveTranscript store={store} interimActive={false} />}
     </>
+  );
+}
+
+/** One collected file, with its own object URL — created once per `collectDownloads()` resolution, revoked together (see the effect below). */
+interface DownloadEntry {
+  name: string;
+  url: string;
+}
+
+/**
+ * Firefox/Safari fallback-honesty fix: the end-of-session download
+ * affordance for whatever `collectDownloads` (see `StoppedScreenProps`)
+ * hands back. Renders nothing while `collectDownloads` is absent or its
+ * result is empty — the ordinary "a real folder was chosen, nothing
+ * degraded" case.
+ *
+ * A small component of its own (not inlined into `StoppedScreen`) purely so
+ * the object-URL lifecycle — create on every (re-)collect, revoke the
+ * PREVIOUS batch on the next collect or on unmount — has one effect to own,
+ * instead of tangling it into the parent's render.
+ */
+function DownloadSection({
+  collectDownloads,
+  annotation,
+}: {
+  collectDownloads?: () => Promise<Map<string, Blob>>;
+  /** Re-run the collection whenever this changes — `writeSpeakerTranscripts` (App.tsx) adds the `-sprecher.*` files to the SAME sink only once this reaches 'done'. */
+  annotation: 'idle' | 'running' | 'done' | 'skipped';
+}) {
+  const [entries, setEntries] = useState<DownloadEntry[]>([]);
+
+  useEffect(() => {
+    if (!collectDownloads) {
+      setEntries([]);
+      return;
+    }
+    let cancelled = false;
+    let createdUrls: string[] = [];
+    void collectDownloads().then((files) => {
+      if (cancelled) return;
+      const next = Array.from(files, ([name, blob]) => ({ name, url: URL.createObjectURL(blob) }));
+      createdUrls = next.map((entry) => entry.url);
+      setEntries(next);
+    });
+    return () => {
+      cancelled = true;
+      // Revokes THIS effect run's own URLs — either superseded by a fresh
+      // collect (annotation changed) or the screen unmounting (a new
+      // recording/import started, or the user navigated away).
+      createdUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [collectDownloads, annotation]);
+
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="download-section" role="group" aria-label={t('stopped.downloadsHeading')}>
+      <p className="download-section__note">{t('stopped.downloadsNote')}</p>
+      <div className="download-section__list">
+        {entries.map((entry) => (
+          <a key={entry.name} className="download-section__link" href={entry.url} download={entry.name}>
+            {entry.name}
+          </a>
+        ))}
+      </div>
+    </div>
   );
 }

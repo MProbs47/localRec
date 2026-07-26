@@ -1214,6 +1214,36 @@ body {
   max-width: 42ch;
 }
 
+/* ── Firefox/Safari fallback-honesty fix — end-of-session download section ─
+   Owner-reported bug: without the File System Access API (Firefox/Safari, or
+   a live-mirror handle that lost write permission mid-session), a session's
+   files sat trapped in OPFS with no way out (the U9/U12a gap). One dim note
+   + a row of plain download links, same screen language as
+   `.annotation-status`/`.import-view__action` — see `StoppedScreen.tsx`'s
+   `DownloadSection`. */
+.download-section { margin: 0 0 14px; display: grid; gap: 8px; }
+.download-section__note {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  color: var(--screen-text);
+  font-size: clamp(12px, 1.3vw, 16px);
+  line-height: 1.5;
+  max-width: 48ch;
+}
+.download-section__list { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.download-section__link {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  font-size: clamp(12px, 1.3vw, 15px);
+  color: var(--screen);
+  background: var(--screen-text);
+  border-radius: var(--radius-screen);
+  padding: 6px 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
 /* ── Phase D (U18) diarization result — speaker-labeled log + rename roster ─ */
 .annotation-status {
   margin: 0 0 10px;
