@@ -163,6 +163,8 @@ export class Engine {
   readonly #onError: (event: MessageEvent) => void;
 
   #diarizationWorker: WorkerLike | null = null;
+  /** Latches `#prefetchDiarizationModels` to one attempt per Engine, so a retried `load()` after a failure doesn't stack downloads. */
+  #diarizationPrefetched = false;
   #diarizer: Diarizer | null = null;
 
   #status: EngineStatus = 'absent';
@@ -302,6 +304,7 @@ export class Engine {
       .then(() => {
         if (this.#loadSettled) return;
         this.#finishLoad({ status: 'ready' });
+        this.#prefetchDiarizationModels();
       })
       .catch((error: unknown) => {
         if (this.#loadSettled) return;
@@ -357,6 +360,52 @@ export class Engine {
       onProgress ? Comlink.proxy(onProgress) : undefined,
       language,
     );
+  }
+
+  // ──────────────────────── Diarization model prefetch ─────────────────────
+
+  /**
+   * Pulls the ~40 MB diarization model set down as soon as transcription is
+   * ready, so "after the one-time download the app needs no network" holds for
+   * the WHOLE app — not just transcription.
+   *
+   * The hole this closes: the diarization models used to load on the FIRST
+   * "detect speakers" press. Someone who did the airplane-mode proof —
+   * download, go offline, record, transcribe — and only then asked for
+   * speakers got a raw network error, with no way to guess that the fix is
+   * "go online once". The promise had an asterisk nobody had written down.
+   * 40 MB on top of ~1.5 GB is 2.7 %: cheaper than the asterisk.
+   *
+   * **Deliberately does not gate readiness.** It fires AFTER `#finishLoad`
+   * publishes `ready`, and a failure is swallowed with an info log. An
+   * optional feature must never keep the app from starting, and it must never
+   * turn an HF hiccup into a dead app (SD-3). The lazy path in
+   * `diarizationRun.ts` stays exactly as it was and remains the fallback: if
+   * this prefetch failed, the first "detect speakers" run downloads as before.
+   *
+   * Accepted trade-off: if the user starts recording within the few seconds
+   * this takes, the download and the ORT session build share CPU with live
+   * transcription. Whisper runs on the GPU and its live driver answers
+   * pressure by lowering the block rate rather than dropping audio, so the
+   * worst case is a slightly late first block — against a guarantee that
+   * holds every time. Building the session here also makes the first real
+   * diarization run start faster.
+   */
+  #prefetchDiarizationModels(): void {
+    if (this.#diarizationPrefetched) return;
+    this.#diarizationPrefetched = true;
+
+    // No progress reporting: the UI already says `ready`, and a second bar
+    // there would suggest the app is not usable yet, which it is.
+    this.diarizer()
+      .initialize(() => {})
+      .catch((error: unknown) => {
+        console.info(
+          '[engine] diarization model prefetch failed — harmless, the first ' +
+            'speaker-detection run will download them again:',
+          error,
+        );
+      });
   }
 
   // ───────────────────────────── Diarization (lazy) ────────────────────────

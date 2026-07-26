@@ -553,6 +553,103 @@ describe('Engine diarizer()', () => {
   });
 });
 
+/**
+ * Closing the airplane-mode hole: the diarization models used to arrive only
+ * on the first "detect speakers" press, so a user who went offline right after
+ * the Whisper download hit a raw network error with no hint that one moment
+ * online would fix it. These lock in that the prefetch happens — and, just as
+ * importantly, that it can never hold the app hostage (SD-3).
+ */
+describe('Engine diarization model prefetch', () => {
+  /** Drains enough microtask turns for load()'s `.then` and the prefetch it kicks off. */
+  const drain = async () => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  };
+
+  it('fetches the diarization models once transcription is ready', async () => {
+    const { engine, diarizationApi } = buildEngine();
+    engine.load();
+    await drain();
+
+    expect(engine.getSnapshot().status).toBe('ready');
+    expect(diarizationApi.initialize).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not touch them before the download finishes', async () => {
+    const transcriptionApi = fakeTranscriptionApi();
+    let release: (() => void) | undefined;
+    transcriptionApi.initialize.mockImplementation(() => new Promise<void>((r) => (release = () => r())));
+    const { engine, diarizationApi } = buildEngine({ transcriptionApi });
+
+    engine.load();
+    await drain();
+    expect(engine.getSnapshot().status).toBe('downloading');
+    expect(diarizationApi.initialize).not.toHaveBeenCalled();
+
+    release?.();
+    await drain();
+    expect(diarizationApi.initialize).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports ready without waiting for the prefetch to finish', async () => {
+    const diarizationApi = fakeDiarizationApi();
+    diarizationApi.initialize.mockImplementation(() => new Promise<void>(() => {})); // never settles
+    const { engine } = buildEngine({ diarizationApi });
+
+    engine.load();
+    await drain();
+
+    // The whole point: an optional 40 MB must not stand between the user and
+    // a working record button.
+    expect(engine.getSnapshot().status).toBe('ready');
+  });
+
+  it('stays ready when the prefetch fails, and says so without throwing', async () => {
+    const diarizationApi = fakeDiarizationApi();
+    diarizationApi.initialize.mockRejectedValue(new Error('offline'));
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const { engine } = buildEngine({ diarizationApi });
+
+    engine.load();
+    await drain();
+
+    expect(engine.getSnapshot()).toEqual({ status: 'ready', progress: 0, error: null });
+    expect(info).toHaveBeenCalled();
+    info.mockRestore();
+  });
+
+  it('does not prefetch when the download itself failed', async () => {
+    const transcriptionApi = fakeTranscriptionApi();
+    transcriptionApi.initialize.mockRejectedValue(new Error('nope'));
+    const { engine, diarizationApi } = buildEngine({ transcriptionApi });
+
+    engine.load();
+    await drain();
+
+    expect(engine.getSnapshot().status).toBe('failed');
+    expect(diarizationApi.initialize).not.toHaveBeenCalled();
+  });
+
+  it('prefetches at most once, even across a retried load()', async () => {
+    const { engine, diarizationApi } = buildEngine();
+    engine.load();
+    await drain();
+    engine.load(); // idempotent no-op while ready — must not stack a second download
+    await drain();
+
+    expect(diarizationApi.initialize).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the lazy diarizer() handle intact — the prefetch reuses it, never a second worker', async () => {
+    const { engine, diarizationWorker } = buildEngine();
+    engine.load();
+    await drain();
+
+    engine.dispose();
+    expect(diarizationWorker.terminate).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('Engine dispose()', () => {
   it('terminates the transcription worker unconditionally', () => {
     const { engine, transcriptionWorker } = buildEngine();

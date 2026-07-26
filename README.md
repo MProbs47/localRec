@@ -53,7 +53,9 @@ you verify it by importing a real recording and reading the result.
 This isn't a promise, it's something you can check. After the **one-time** model download,
 localRec never needs the network again:
 
-1. Open the app online once and let the model load (~1.5 GB, once).
+1. Open the app online once and let the models load (~1.5 GB, once). This includes the
+   speaker-identification models, so the guarantee below covers speaker detection too —
+   not just transcription.
 2. **Turn on airplane mode** — or just watch the Network tab in DevTools.
 3. Keep recording and transcribing. Nothing changes.
 
@@ -139,8 +141,12 @@ in the code, in the UI, and in conversation.
 [`pyannote-segmentation-3.0`](https://huggingface.co/onnx-community/pyannote-segmentation-3.0)
 and
 [`wespeaker-voxceleb-resnet34-LM`](https://huggingface.co/onnx-community/wespeaker-voxceleb-resnet34-LM)
-(~40 MB together, fetched on the first diarization run). All three are permissively
-licensed and **not gated** — no account, no token.
+(~40 MB together). Those two are fetched in the background as soon as transcription is
+ready, rather than on the first speaker-detection run — otherwise going offline straight
+after the download would leave speaker detection stranded, and "no network needed" would
+carry an asterisk. The download never gates the record button: if it fails, the app is
+fully usable and the first speaker-detection run simply fetches them itself. All three
+models are permissively licensed and **not gated** — no account, no token.
 
 ---
 
