@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>localRec</title>
+    <meta
+      name="description"
+      content="Local-first Meeting-Transkription: Sprache wird vollständig on-device transkribiert. Nichts verlässt das Gerät."
+    />
+
+    <!--
+      CSP fallback for local/offline serving where public/_headers doesn't
+      apply (e.g. `vite preview`, file://, or hosts that ignore _headers).
+      The real, authoritative CSP is the HTTP header shipped via
+      public/_headers on Cloudflare Pages (KTD9). Source of truth for both
+      is src/trust/csp.ts — kept in sync by src/trust/csp.test.ts.
+
+      Note: frame-ancestors, HSTS and X-Content-Type-Options do NOT work via
+      <meta http-equiv> per spec, so they are intentionally absent here and
+      live only in public/_headers.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'self' https://huggingface.co https://*.hf.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co https://cdn-lfs-eu-1.huggingface.co; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'"
+    />
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#101418" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+*.local
+
+# Vite / PWA
+dev-dist/
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+*.log
+
+# Agenten- & Container-Werkzeug: lokal, gehört nicht ins Repo
+# (.claude/ deckt die ce-work-Worktrees mit ab; skills-lock.json pinnt nur
+# die Skill-Dateien unter .claude/, die hier ohnehin ignoriert werden)
+.claude/
+.devcontainer/
+skills-lock.json
+
+# Models & large local artifacts (never commit the 2.5 GB model)
+*.onnx
+*.onnx_data
+models/
+
+# Manual validation run outputs (recorded audio + generated transcripts)
+test/
+
+# Planung & Protokolle: Arbeitsmaterial, nicht Produkt. Bleiben lokal —
+# im Repo dokumentieren sich Entscheide über README.md, CONTEXT.md und die
+# Kommentare am Code. (Für den Public-Launch entfernt; in der Git-Historie
+# bis zum geplanten filter-repo-Lauf noch vorhanden.)
+docs/

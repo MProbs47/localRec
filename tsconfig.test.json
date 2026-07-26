@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // "vite/client" added alongside "node" (U9): App.test.tsx imports App.tsx,
+    // which unconditionally imports "./ui/theme.css" — the ambient
+    // `declare module '*.css'` for that side-effect import lives in
+    // vite/client's types, otherwise absent from this project's Node-only type
+    // set. Test-config-only change; does not affect the app build.
+    "types": ["node", "vite/client"]
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "vite.config.test.ts"],
+  "exclude": []
+}

@@ -1,0 +1,1407 @@
+/*
+ * U12 theme.css — the whole visual language of the "local only" dictaphone.
+ *
+ * Authority: the owner's "local only" device spec (§2 tokens verbatim) plus
+ * its two reference renders. This file *implements* that spec and
+ * invents nothing: every colour, radius and font here traces back to §2, and
+ * the layout traces to the reference renders (ready + recording).
+ *
+ * Verbindliche Verbote (§1): no gradients, shadows, blurs, material imitation;
+ * no third colour beyond --signal; no rounded corners beyond the named ones;
+ * no icon library (every mark here is a circle, rectangle or dot raster); no
+ * animation beyond cursor blink, VU deflection and the ready→recording morph.
+ *
+ * Fonts are imported as JS side-effects in main.tsx from @fontsource (local
+ * woff2, same-origin) — never Google Fonts — so the app starts offline and
+ * satisfies the U1 CSP (default-src 'self'). See main.tsx.
+ */
+
+/* ─────────────────────────── Design tokens (§2) ─────────────────────────── */
+:root {
+  /* Farben */
+  --bg:          #F2F0EB; /* warmes Off-White, Gehäuse */
+  --ink:         #0A0A0A; /* Schwarz, Text und Rahmen */
+  --screen:      #000000; /* Display-Fläche */
+  --screen-text: #F2F0EB; /* Text im Display, final */
+  --screen-dim:  #77776F; /* Text im Display, noch veränderlich */
+  --signal:      #E5352B; /* Rot: LED und Aufnahme. Einzige Akzentfarbe */
+
+  /* Typografie */
+  --font-display: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-mono:    "JetBrains Mono", "IBM Plex Mono", monospace;
+
+  /* Raster */
+  --hairline: 1px;
+  --bezel:    6px;  /* äusserer Displayrahmen */
+  --mat:     14px;  /* heller Zwischenraum im Rahmen */
+  --radius-panel:  14px;
+  --radius-screen:  4px;
+
+  /* Mikrofonblock oben rechts: Punktraster + LED-Spalte. Der Pegel unten
+     rechts richtet sich an DIESEN Werten aus (gemeinsame Spaltenachse),
+     deshalb sind sie Tokens und keine Inline-Zahlen. */
+  --led-size:     14px;
+  --mic-gap:      10px;
+  --grille-size:  clamp(96px, 10vw, 150px);
+  --mic-row-gap:  clamp(12px, 1.4vw, 20px);
+
+  --panel-gap:    clamp(10px, 1.4vw, 20px);
+  /* Halbe Breite des Pegelblocks als Sicherheitsabstand — massgeblich ist NICHT
+     die Balkenbreite (2 × 14 px + 4 px), sondern die breitere Beschriftung
+     „MIKROFON" darunter (~66 px in 12 px Mono). */
+  --vu-half:      36px;
+
+  /* Übergang — nur Grösse/Position, nie Überblenden (§4) */
+  --morph-duration: 320ms;
+  --morph-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ─────────────────────────────── Reset ─────────────────────────────────── */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Geschlitzte Null auf allen Mono-Elementen (§2) — ohne sie fällt die
+   ganze Ziffern-Anmutung des Diktiergeräts in sich zusammen. */
+.mono,
+.device__mod,
+.device__status,
+.device__timer,
+.device__rec,
+.steps,
+.jack__label,
+.vu__label,
+.transcript__final,
+.transcript__interim,
+.first-run__progress-label {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+}
+
+/* Sichtbarer Fokusring in --ink, 2px, mit 2px Abstand (§9). */
+:where(button, [tabindex], a, input, select):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ─────────────────────────────── Bühne ─────────────────────────────────── */
+/* Das Gehäuse: warmes Off-White, füllt den Viewport. Die zwei Zustände
+   unterscheiden sich durch data-state — Grösse/Position, kein Layout-Swap.
+   Die Peripherie (Titel/Mikro/Schritte/Klinke/Fuss) ist absolut an den Ecken
+   verankert, die Bühne (VU+Display) füllt zentriert die Fläche. So gibt das
+   einfahrende Chrome (§4) seinen Platz frei, ohne eine Layout-Lücke zu
+   hinterlassen — das Display kann ungehindert von 55% auf 85% wachsen. */
+.device {
+  --pad: clamp(20px, 3.2vw, 44px);
+  /* Was das zentrierte Display rechts frei lässt (§4: 74 % der Bühnenbreite →
+     (100 − 74)/2 = 13 %). In Längen statt Prozent, weil der Pegel im Panel
+     hängt und ein Prozentwert sich dort auf die PANELBREITE bezöge, nicht auf
+     die Bühne.
+     MUSS hier stehen und nicht in :root: eine Custom Property wird dort
+     ausgerechnet, wo sie DEKLARIERT ist. In :root gibt es kein `--pad`, das
+     `var(--pad)` wäre also ungültig — und die ungültige Property vererbt sich
+     nach unten weiter, womit `left` beim Pegel auf `auto` fällt und er in der
+     Ecke des Displays landet. Genau das ist einmal passiert. */
+  --panel-side: calc(0.13 * (100vw - 2 * var(--pad)));
+  /* Die x-Position der Mikrofonspalte (Raster oben, Pegel am Display),
+     gemessen vom rechten Geräterand: normalerweise die Rastermitte — aber nie
+     so weit links, dass die Spalte auf dem Display läge. Bei Aufnahme wächst
+     das Display auf 88 %, dann rückt die Spalte nach aussen. EINE Quelle für
+     beide, damit sie in JEDEM Zustand auf einer Achse bleiben. */
+  --column-x: min(
+    calc(var(--pad) + var(--led-size) + var(--mic-gap) + var(--grille-size) / 2),
+    calc(var(--pad) + var(--panel-side) - var(--panel-gap) - var(--vu-half))
+  );
+  position: relative;
+  height: 100%;
+  min-height: 100dvh;
+  padding: var(--pad);
+  overflow: hidden;
+}
+
+/* ── Kopf: Titel links, Mikrofon rechts, an der Oberkante verankert ─────── */
+.device__head {
+  position: absolute;
+  top: var(--pad);
+  left: var(--pad);
+  right: var(--pad);
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  pointer-events: none; /* rein dekorativ (Titel/Gitter/LED) */
+}
+.device__title-block { max-width: 62%; }
+
+.device__title-block { min-width: 0; }
+
+.device__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 0.92;
+  /* Marke "localRec" behält ihre Binnenmajuskel (camelCase) — kein lowercase-Zwang. */
+  text-transform: none;
+  font-size: clamp(64px, 11vw, 140px);
+}
+
+/* "Rec" im selben Signalrot wie der Aufnahmeknopf. */
+.device__title-rec { color: var(--signal); }
+
+/* Haarlinie über die volle Breite unter dem Titel (§3). */
+.device__hairline {
+  height: var(--hairline);
+  background: var(--ink);
+  margin: clamp(8px, 1vw, 16px) 0 clamp(6px, 0.8vw, 12px);
+}
+
+/* Zwei Zeilen, beide voll Schwarz — die Flugmodus-Zeile wird NICHT grau (§3). */
+.device__subtitle {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  font-size: clamp(14px, 1.5vw, 22px);
+}
+
+/* ── Kopfecke oben rechts: Sprachwähler über dem Mikrofonblock (U4/KTD17,
+   Offener Punkt 3) ───────────────────────────────────────────────────────
+   Ein Spalten-Wrapper, kein Grid-Umbau: `.device__head` bleibt bei genau
+   zwei Flex-Kindern (Titelblock, dieser Wrapper), `justify-content:
+   space-between` also unverändert. Rechtsbündig gestapelt, damit der
+   Sprachwähler oben in derselben Ecke wie
+   Mikrofonraster/LED sitzt, ohne sie zu verdrängen. */
+.device__head-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: clamp(6px, 0.8vw, 12px);
+}
+
+/* Der Kopf ist `pointer-events: none` (rein dekorativ) — diese Zeile holt sie
+   sich explizit zurück.
+   Owner-Feedback (2026-07-26): „noch etwas weiter in die rechte Ecke oben".
+   Der Sprachwähler ist der einzige Bewohner dieser Zeile (U5s „i"-Knopf ist
+   weg, siehe `.panel__engraving`) und darf darum aus dem gemeinsamen
+   `--pad`-Raster ausbrechen: ein negativer Rand von je einem Drittel schiebt
+   ihn Richtung Ecke, ohne den Titelblock oder die Mikrofonspalte darunter zu
+   verschieben — die Zeile ist absolut positionierter Kopfinhalt, das
+   Geräteraster selbst bleibt unangetastet. */
+.device__head-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  pointer-events: auto;
+  margin: calc(-0.34 * var(--pad)) calc(-0.34 * var(--pad)) 0 0;
+}
+
+/* Der Sprachwähler selbst: Mono, Haarlinie, gedämpft — dieselbe
+   Formsprache wie `.panel__engraving`/`.device__status`, kein Farbakzent,
+   kein Schatten (§1). Klein genug, um in der Ecke nie mit dem Titelblock oder
+   der Mikrofonspalte zu kollidieren, auch auf der schmalsten Breite (< 900px),
+   wo `.device__head` unverändert bleibt.
+   Owner-Feedback (2026-07-26): ein echtes Dropdown statt eines Knopfs, der
+   sich durch fünf Sprachen klickt. Das `<select>` erbt die Mono-Sprache und
+   wirft sein eigenes Chrome weitgehend ab (`appearance: none` wäre ein
+   eigener Pfeil zum Nachbauen — der native Pfeil ist hier das ehrlichere,
+   kleinere Mittel: er SAGT, dass es ein Menü ist). */
+.locale-switch {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: var(--hairline) solid var(--ink);
+  border-radius: 3px;
+  background: none;
+  padding: 3px 4px 3px 8px;
+  cursor: pointer;
+  color: var(--ink);
+  line-height: 1;
+}
+.locale-switch:hover { opacity: 0.7; }
+.locale-switch svg { display: block; flex-shrink: 0; }
+.locale-switch__control {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.locale-switch__control:focus-visible { outline: var(--hairline) solid var(--ink); outline-offset: 2px; }
+
+/* ── Mikrofongitter + LED, oben rechts (§3) ─────────────────────────────── */
+.device__mic {
+  display: grid;
+  /* Spalte 1 = Punktraster, Spalte 2 = LED. */
+  grid-template-columns: auto auto;
+  align-items: start;
+  column-gap: var(--mic-gap);
+  justify-self: end;
+}
+/* ── Pegel: auf der Mikrofonachse, vertikal auf Displaymitte ─────────────────
+   Zwei Bezüge auf einmal:
+   - VERTIKAL auf der Mitte des Displays → deshalb hängt er im Panel (`top: 50%`),
+     nur das Panel weiss, wo seine Mitte liegt.
+   - HORIZONTAL auf derselben Achse wie das Punktraster darüber, damit die
+     beiden eine Spalte bilden. Von der rechten Displaykante aus: der freie Streifen
+     `--panel-side` minus dem Abstand, den die Rastermitte vom rechten Geräterand
+     hat (LED-Spalte + Spalt + halbes Raster) — dieselben Tokens, die der Kopf
+     selbst benutzt. Der Geräterand kürzt sich dabei heraus, die Achse
+     stimmt deshalb in JEDEM Zustand, auch wenn das Display auf 88 % wächst. */
+.mic-level {
+  position: absolute;
+  top: 50%;
+  /* Von der rechten Displaykante bis zur gemeinsamen Spaltenachse. */
+  left: calc(100% + var(--pad) + var(--panel-side) - var(--column-x));
+  transform: translate(-50%, -50%);
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+/* Aufnahme/gestoppt: das Display wächst auf 88 % (§4) → (100 − 88)/2 = 6 %. Das
+   gilt fürs ganze Gerät, nicht nur fürs Panel: `--column-x` rechnet damit. */
+.device[data-state="recording"],
+.device[data-state="stopped"] { --panel-side: calc(0.06 * (100vw - 2 * var(--pad))); }
+/* "MIKROFON" unter dem Pegel — dieselbe Schrift/Grösse wie "LINE IN" unter der
+   Buchse, damit die beiden Beschriftungen als ein System lesbar sind. */
+.mic-caption {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+.mic-grille {
+  grid-column: 1;
+  justify-self: center; /* eine Mittelachse für das Raster */
+  width: var(--grille-size);
+  height: var(--grille-size);
+  border: var(--hairline) solid var(--ink);
+  border-radius: 50%;
+  /* Punktraster als CSS radial-gradient-Kachel (§3: kein Icon, nur Punkte). */
+  background-image: radial-gradient(var(--ink) 1.1px, transparent 1.3px);
+  background-size: 9px 9px;
+  background-position: center;
+  /* Kreisförmig beschneiden, damit das Raster den Rand nicht überläuft. */
+  -webkit-mask: radial-gradient(circle at center, #000 98%, transparent 100%);
+          mask: radial-gradient(circle at center, #000 98%, transparent 100%);
+}
+
+/* Rote LED — nur während der Aufnahme sichtbar (§4). Auf der Landing/idle
+   ganz aus (kein ruhender roter Punkt oben rechts). */
+.led {
+  width: var(--led-size);
+  height: var(--led-size);
+  border-radius: 50%;
+  background: var(--signal);
+  opacity: 0;
+  transition: opacity var(--morph-duration) var(--morph-ease);
+}
+.device[data-state="recording"] .led { opacity: 1; }
+
+/* ── Bühne: VU-Meter + Display, zentriert über die ganze Fläche ─────────── */
+.stage {
+  position: absolute;
+  inset: var(--pad);
+  z-index: 1;
+  display: grid;
+  /* Eine seiten-zentrierte Spalte: das Panel (und damit die Knopfmitte) liegt
+     immer exakt in der Seitenmitte. Das VU-Meter ist kein Grid-Geschwister
+     mehr, sondern absolut am Panel verankert (siehe .vu), verschiebt die
+     Zentrierung also nicht. */
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  align-content: center; /* Aufnahme/gestoppt: Display mittig, Chrome ist weg */
+  gap: clamp(10px, 1.4vw, 20px);
+}
+
+/* Nicht-Aufnahme: das Display sitzt UNTER dem Titelblock (Reserve-Band oben),
+   damit es Titel/Untertitel nicht überlagert; die Schritte/Klinke sitzen als
+   absolute Fusszeile darunter. Aufnahme lässt diese Reserve weg → mittig. */
+.device[data-state="ready"] .stage,
+.device[data-state="idle"] .stage,
+.device[data-state="downloading"] .stage,
+.device[data-state="error"] .stage,
+.device[data-state="recovery"] .stage {
+  align-content: start;
+  padding-top: clamp(210px, 31vh, 320px);
+}
+
+/* Das Display-Wrapper steuert die Grösse: ~55% Ruhe → ~85% Aufnahme (§3/§4).
+   Nur width/height transitionieren, cubic-bezier, kein Überblenden. */
+.panel-wrap {
+  position: relative;
+  justify-self: center; /* seiten-zentriert → Knopf (Panelmitte) in der Seitenmitte */
+  width: 100%;
+  /* 74% → symmetrische Ränder von je 13%; die linke Kante fällt so etwa auf das
+     "G" von GELADEN. Reine Breiten-Stellschraube (Zentrierung bleibt exakt):
+     etwas grösser rückt die Kante nach links, kleiner nach rechts. */
+  max-width: 74%;
+  transition: max-width var(--morph-duration) var(--morph-ease);
+}
+/* Aufnahme/gestoppt: gross, weiterhin mittig (Chrome ist weg, §4). */
+.device[data-state="recording"] .panel-wrap,
+.device[data-state="stopped"]   .panel-wrap { max-width: 88%; }
+
+/* ── Der Displayrahmen: doppelter Bezel (§3, Abschnitt 2 der Bau-Reihenfolge) ─ */
+.panel {
+  position: relative;
+  width: 100%;
+  border: var(--bezel) solid var(--ink); /* 6px ink */
+  padding: var(--mat);                    /* 14px heller Zwischenraum */
+  border-radius: var(--radius-panel);     /* 14px */
+  background: var(--bg);
+}
+
+.screen {
+  position: relative;
+  background: var(--screen);
+  border-radius: var(--radius-screen); /* 4px */
+  color: var(--screen-text);
+  overflow: hidden;
+  /* Höhe wächst mit dem Zustand; die Ruhe-Höhe ist kompakter. */
+  height: clamp(180px, 30vh, 340px);
+  padding: clamp(14px, 2vw, 30px);
+  transition: height var(--morph-duration) var(--morph-ease);
+}
+.device[data-state="recording"] .screen,
+.device[data-state="stopped"]   .screen { height: clamp(300px, 60vh, 680px); }
+
+/* ── Die zwei Gravuren unter dem Display (§3) ─────────────────────────────
+   Ursprünglich stand hier nur `MOD.001` rechts — reine Zierschrift. Owner-
+   Feedback (2026-07-26): dieselbe Gravurschrift trägt jetzt die zwei
+   Handlungen, die an dieser Stelle wirklich gebraucht werden — links
+   „Löschen & neu laden", rechts „So funktioniert es" (öffnet das
+   Info-Fenster). Knöpfe, aber bewusst ohne Knopf-Aussehen: gleiche Grösse,
+   gleiche Laufweite, gleiche Farbe wie die alte Gravur. `nowrap`, weil beide
+   an gegenüberliegenden Ecken hängen und ein Umbruch sie ins Display
+   schieben würde (Längen-Guard, `length.test.ts`). */
+.panel__engraving {
+  position: absolute;
+  bottom: -26px;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  /* Owner-Feedback (2026-07-26): Versalien, wie `MOD.001` es war — es sind
+     Gravuren im Gehäuse, keine Sätze. `text-transform` und nicht in die
+     Strings geschrieben, damit der zugängliche Name (und damit jeder Test)
+     die normale Schreibweise behält. */
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink);
+  cursor: pointer;
+}
+.panel__engraving:hover { opacity: 0.6; }
+.panel__engraving:focus-visible { outline: var(--hairline) solid var(--ink); outline-offset: 3px; }
+.panel__clear { left: 6px; }
+.panel__mod   { right: 6px; }
+
+/* Nach der Aufnahme wechseln beide über das Display (Owner-Feedback
+   2026-07-26): im `stopped`-Zustand wächst das Display auf 88 % und die
+   Fusszeile rückt darunter — unten liefen die Gravuren dann in die
+   Schrittliste links und in den Zeitzähler rechts hinein. Oben ist der
+   Streifen frei: `.stage` zentriert das Display senkrecht, der Titel ist auf
+   Kleinformat geschrumpft, und `ModeToggle` ist in diesem Zustand gar nicht
+   mehr gerendert. Nur die Verankerung dreht sich, Ausrichtung und Schrift
+   bleiben. */
+.device[data-state="stopped"] .panel__engraving {
+  bottom: auto;
+  top: -26px;
+}
+
+/* ── Display-Inhalt: Demo-Schleife (ready) bzw. Live-Transkript (recording) ─ */
+/* Gemeinsame Mono-Versalien-Typografie im Display (§2). */
+.screen__lines,
+.transcript__final,
+.transcript__interim {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  text-transform: uppercase;
+  line-height: 1.75;
+  font-size: clamp(15px, 1.9vw, 30px);
+  font-feature-settings: "zero" 1;
+}
+
+.screen__lines { margin: 0; }
+.screen__line { color: var(--screen-text); }
+.screen__line--dim { color: var(--screen-dim); }
+
+/* Blockcursor, 1s Blinkintervall (§6). */
+.screen__cursor,
+.transcript__cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 1.05em;
+  margin-left: 0.12em;
+  vertical-align: text-bottom;
+  background: var(--screen-dim);
+  animation: cursor-blink 1s steps(1) infinite;
+}
+@keyframes cursor-blink { 50% { opacity: 0; } }
+
+/* ── U8 LiveTranscript im Display ───────────────────────────────────────── */
+.transcript { height: 100%; }
+
+.transcript__final { color: var(--screen-text); }
+.transcript__row   { white-space: pre-wrap; }
+
+/* Nur die letzte Zeile veränderlich, in --screen-dim (§6). */
+.transcript__interim {
+  margin: 0;
+  color: var(--screen-dim);
+}
+
+/* ↓ LIVE — kleiner Mono-Knopf unten rechts, wenn Auto-Scroll pausiert (§6). */
+.transcript__live-jump {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--screen);
+  background: var(--screen-text);
+  border: none;
+  border-radius: var(--radius-screen);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+/* ── U5: das Info-Fenster ─────────────────────────────────────────────────
+   Owner-Feedback (2026-07-26): ein Pop-up, das AUSSIEHT wie das Display in
+   der Mitte — derselbe doppelte Bezel (`--bezel`/`--mat`/`--radius-panel`)
+   um dieselbe schwarze Scheibe —, statt eines Inhaltstauschs im echten
+   Display. `position: fixed` über der ganzen Seite; `.device` erzeugt keinen
+   Transform-/Filter-Containing-Block, sein `overflow: hidden` greift hier
+   also nicht. Gescrollt wird INNEN (`.info-modal__screen`), das Fenster
+   selbst wächst nie über den Viewport hinaus.
+
+   FLEX, nicht Grid (Owner-Feedback 2026-07-26 — das Fenster lief unten aus
+   dem Bild): bei `display: grid; place-items: center` bemisst sich das
+   `max-height: 100%` des Fensters an der GRID-ZEILE, und die wächst mit dem
+   Inhalt — die Deckelung greift also nie, das Fenster wird so hoch wie sein
+   Text. Als Flex-Kind bezieht sich dieselbe Prozentangabe auf die Höhe des
+   Containers, und die steht durch `inset: 0` fest. */
+.info-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(16px, 4vw, 56px);
+}
+
+.info-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  /* --ink mit Deckung; die Seite bleibt erkennbar, tritt aber zurück. */
+  background: rgba(17, 17, 17, 0.55);
+}
+
+.info-modal__panel {
+  position: relative; /* über dem Backdrop */
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: 100%;
+  border: var(--bezel) solid var(--ink);
+  padding: var(--mat);
+  border-radius: var(--radius-panel);
+  background: var(--bg);
+}
+
+/* Die scrollende Scheibe. `min-height: 0` ist nicht optional: ein Flex-Kind
+   schrumpft ohne diese Angabe nie unter seine Inhaltshöhe, das Fenster würde
+   also trotz `max-height` oben wieder aufgehen statt innen zu scrollen.
+   Oben KEIN Padding — das übernimmt die mitscrollende Kopfzeile
+   (`.info-view__bar`), die sonst nicht sauber an der Oberkante kleben kann. */
+.info-modal__screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  background: var(--screen);
+  border-radius: var(--radius-screen);
+  color: var(--screen-text);
+  padding: 0 clamp(14px, 2vw, 30px) clamp(14px, 2vw, 30px);
+}
+
+/* KTD9: Prosa, nicht Display-Typografie — explizit `text-transform: none`
+   und eine deutlich kleinere Schriftgrösse als `.screen__lines`/
+   `.transcript__final` (deren Mono-Versalien vier kurze Demo-Zeilen tragen,
+   aber keine 25 Sätze). Übernimmt Displayfarben (`--screen-text` auf
+   `--screen`) von `.screen`, dessen Kind sie ist. */
+.info-view {
+  text-transform: none;
+  font-family: var(--font-display);
+  font-size: clamp(13px, 1.3vw, 16px);
+  line-height: 1.5;
+  color: var(--screen-text);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Die Kopfzeile bleibt beim Scrollen stehen (Owner-Feedback 2026-07-26: „der
+   Zurück-Knopf würde statisch oben in der Ecke bleiben") — sonst ist der Weg
+   aus dem Fenster nach der ersten Umdrehung ausser Sicht, ausser über
+   `Escape`, das man kennen muss. Deckende Displayfarbe, damit der Text
+   wirklich DAHINTER durchläuft und nicht durchscheint; das Padding oben ist
+   das, was `.info-modal__screen` deshalb nicht selbst setzt. */
+.info-view__bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  background: var(--screen);
+  padding: clamp(14px, 2vw, 30px) 0 10px;
+}
+
+.info-view__back {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 13px;
+  color: var(--screen);
+  background: var(--screen-text);
+  border: none;
+  border-radius: var(--radius-screen);
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.info-view__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.info-view__heading {
+  margin: 0;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 13px;
+  color: var(--screen-dim);
+}
+
+.info-view__list {
+  margin: 0;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* KTD10, nicht verhandelbar — sichtbar hervorgehoben, nicht nur ein Satz
+   unter vielen. */
+.info-view__device-limit {
+  margin: 0;
+  font-weight: 700;
+}
+
+.info-view__prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.info-view__prompt-label {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* Manuelles Markieren funktioniert immer (Plan approach step 5) — der Prompt
+   steht als vollständiger, selektierbarer Text da, unabhängig vom
+   "Kopieren"-Knopf daneben. */
+.info-view__prompt-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  background: rgba(242, 240, 235, 0.06);
+  border: var(--hairline) solid var(--screen-dim);
+  border-radius: var(--radius-screen);
+  padding: 10px 12px;
+}
+
+.info-view__prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.info-view__copy {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 12px;
+  color: var(--screen);
+  background: var(--screen-text);
+  border: none;
+  border-radius: var(--radius-screen);
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.info-view__copy-feedback { font-size: 12px; color: var(--screen-dim); }
+.info-view__copy-feedback--failed { color: var(--signal); }
+
+/* ── Der Knopf — stanzt durch den Rahmen (§5, kritisches Bauteil) ────────── */
+.record-button {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translate(-50%, 50%);
+  width: clamp(84px, 9vw, 120px);
+  aspect-ratio: 1;
+  background: var(--bg); /* die Aussparung — deckt Rahmen+Screen aus */
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  z-index: 2;
+}
+.record-button:disabled { cursor: not-allowed; }
+
+/* Ring: 3px ink, kreisrund, mit Abstand innerhalb der Aussparung (§5). */
+.record-button__ring {
+  width: 76%;
+  height: 76%;
+  border: 3px solid var(--ink);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+/* Symbol Ruhe: schwarzer Kreis (§5) mit rotem Play-Dreieck darin.
+   Owner-Feedback (2026-07-26): der rote PUNKT von §5 ist das Zeichen für
+   „aufnahmebereit", sagt aber nichts darüber, was ein Druck bewirkt — Play
+   und Stopp sagen es ohne ein einziges Wort. Der schwarze Kreis bleibt, nur
+   die Marke darin wechselt. */
+.record-button__dot-outer {
+  width: 62%;
+  height: 62%;
+  border-radius: 50%;
+  background: var(--ink);
+  display: grid;
+  place-items: center;
+}
+/* `clip-path` statt Border-Trick oder SVG: das Dreieck bleibt damit eine
+   echte Fläche in `--signal` (kein Rahmen, der sich bei Farbwechseln anders
+   verhält) und fügt sich in die Formsprache aus Kreis, Rechteck und Punkt
+   ein — keine Icon-Bibliothek (§1). Etwas schmaler als hoch, wie ein
+   Play-Zeichen gezeichnet wird, und um 6 % nach rechts geschoben: der
+   Schwerpunkt eines Dreiecks liegt links seiner Bounding-Box-Mitte, geometrisch
+   zentriert sähe es nach links verrutscht aus. */
+.record-button__play {
+  width: 30%;
+  height: 34%;
+  background: var(--signal);
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+  transform: translateX(6%);
+}
+
+/* Symbol Aufnahme/Verarbeitung: rotes abgerundetes Quadrat = Stopp (§5). */
+.record-button__square {
+  width: 42%;
+  height: 42%;
+  border-radius: 5px;
+  background: var(--signal);
+}
+
+/* ── VU-Meter: zwei Spalten à 18 Segmenten (§7) ─────────────────────────── */
+.vu {
+  /* `relative` als Anker für das "IN"-Label darüber; die Platzierung macht
+     `.mic-level` (rechts neben dem Display, vertikal auf dessen Mitte). */
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  gap: 4px;
+  align-content: center;
+}
+
+.vu__col {
+  display: grid;
+  grid-auto-flow: row;
+  gap: 3px;
+}
+/* Segmente auf die Grösse des Displays herunterskaliert (§7): 18 Segmente +
+   Lücken bleiben so innerhalb der Display-Höhe statt darüber hinaus. */
+.vu__seg {
+  width: clamp(9px, 0.9vw, 14px);
+  height: clamp(5px, 0.55vw, 8px);
+  border: var(--hairline) solid var(--ink); /* leer: 1px-Kontur (§7) */
+  border-radius: 2px;
+}
+.vu__seg--on { background: var(--ink); } /* gefüllt: --ink (§7) */
+
+/* "IN" zentriert ÜBER den VU-Balken (aus dem Grid-Fluss gelöst, absolut am
+   .vu-Kasten verankert) — nicht mehr seitlich versetzt. */
+.vu__label {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 5px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-align: center;
+  color: var(--ink);
+}
+
+/* ── Fuss: Schritte + Klinke links, Timer + Status rechts, unten verankert ─ */
+.device__foot {
+  position: absolute;
+  bottom: var(--pad);
+  left: var(--pad);
+  right: var(--pad);
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 24px;
+  pointer-events: none;
+}
+
+.foot__left  { display: grid; grid-auto-flow: column; align-items: end; gap: 20px; }
+/* margin-left:auto hält den Timer-Block rechts, auch wenn foot__left ganz
+   verschwindet (Aufnahme bzw. reduzierte Bewegung → sonst rutscht er bei
+   space-between mit nur einem Kind nach links). */
+.foot__right { display: grid; justify-items: end; gap: 6px; margin-left: auto; }
+
+/* Klinkenbuchse: abgerundetes schwarzes Quadrat, zwei konzentrische Kreise (§3). */
+.jack {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+.jack__socket {
+  width: clamp(38px, 3.6vw, 54px); /* kleiner: passt unter das grosse Display, kein Overlap */
+  aspect-ratio: 1;
+  background: var(--ink);
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+}
+.jack__ring-outer {
+  width: 62%;
+  height: 62%;
+  border-radius: 50%;
+  background: var(--bg); /* aussen hell */
+  display: grid;
+  place-items: center;
+}
+.jack__ring-inner {
+  width: 46%;
+  height: 46%;
+  border-radius: 50%;
+  background: var(--ink); /* innen schwarz */
+}
+.jack__label {
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+}
+
+/* Schritte: drei Zeilen mit Haarlinien getrennt, Mono-Versalien (§3). */
+.steps { display: grid; align-content: end; }
+.step {
+  display: grid;
+  grid-template-columns: 1.4em 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0; /* kompakter: 3 Zeilen bleiben unter dem Display */
+  border-top: var(--hairline) solid var(--ink);
+  font-size: clamp(11px, 1vw, 14px);
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.step:first-child { border-top: none; }
+.step__num { color: var(--ink); }
+.step__check { color: var(--ink); }        /* ✓ für erledigt */
+.step__marker {                             /* gefülltes Quadrat für aktiv */
+  width: 11px;
+  height: 11px;
+  background: var(--ink);
+  justify-self: start;
+}
+
+/* Timer + Status (§3/§4). */
+.device__timer {
+  font-size: clamp(24px, 3vw, 40px);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+.device__status {
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+}
+.device__rec {
+  color: var(--signal);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+/* ── Chrome, das im Aufnahme-/Stopp-Zustand einfährt (§4) ────────────────── */
+/* "fahren ein" = Positionswechsel (transform), kein Überblenden. */
+.device__title,
+.device__subtitle,
+.device__hairline,
+.device__mic,
+.mic-grille,
+.foot__left {
+  transition: transform var(--morph-duration) var(--morph-ease),
+              opacity var(--morph-duration) var(--morph-ease),
+              font-size var(--morph-duration) var(--morph-ease);
+}
+/* Aufnahme UND Stopp: der Schriftzug "offRecord" BLEIBT oben links, nur
+   kleiner — Untertitel, Haarlinie und Mikro/LED verschwinden. So gehört der
+   Screen der Bühne, ohne die Marke ganz zu verlieren. */
+.device[data-state="recording"] .device__title,
+.device[data-state="stopped"]   .device__title {
+  font-size: clamp(30px, 3.2vw, 52px); /* minimal grösser als zuvor (§ User) */
+  line-height: 1;
+}
+.device[data-state="recording"] .device__subtitle,
+.device[data-state="stopped"]   .device__subtitle,
+.device[data-state="recording"] .device__hairline,
+.device[data-state="stopped"]   .device__hairline,
+/* Raster + LED verschwinden (§4). */
+.device[data-state="recording"] .mic-grille,
+.device[data-state="recording"] .led,
+.device[data-state="stopped"]   .mic-grille,
+.device[data-state="stopped"]   .led {
+  opacity: 0;
+  pointer-events: none;
+}
+/* Nur Aufnahme: auch Schritte/Klinke weg (reiner Screen + Knopf + Timer +
+   VU). Stopp behält die Schritte (Post-Stopp-Checkliste). Die zwei Gravuren
+   unter dem Display brauchen hier keine Regel mehr: `App.tsx` rendert sie
+   ausschliesslich auf idle/ready. */
+.device[data-state="recording"] .foot__left {
+  opacity: 0;
+  pointer-events: none;
+}
+.device[data-state="recording"] .foot__left { transform: translateY(160%); }
+
+/* ── Restzustände ───────────────────────────────────────────────────────── */
+/* downloading: FirstRun-Fortschritt im Display. */
+.first-run { display: grid; gap: 12px; }
+.first-run__message {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--screen-text);
+  font-size: clamp(14px, 1.7vw, 24px);
+  line-height: 1.6;
+}
+.first-run__progress {
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  border: var(--hairline) solid var(--screen-text);
+  border-radius: 0;
+  background: var(--screen);
+}
+.first-run__progress::-webkit-progress-bar { background: var(--screen); }
+.first-run__progress::-webkit-progress-value { background: var(--screen-text); }
+.first-run__progress::-moz-progress-bar { background: var(--screen-text); }
+.first-run__progress-label {
+  margin: 0;
+  color: var(--screen-dim);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+.first-run__error { display: grid; gap: 6px; }
+.first-run__error-detail { color: var(--signal); font-family: var(--font-mono); }
+
+/* idle: der bewusste "Modell laden"-Knopf im Display (§1 — kein Auto-Download).
+   Gleiche Mono-Sprache wie die recovery/live-jump-Knöpfe, invertiert. */
+.first-run__action {
+  justify-self: start;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: clamp(14px, 1.6vw, 18px);
+  color: var(--screen);
+  background: var(--screen-text);
+  border: none;
+  border-radius: var(--radius-screen);
+  padding: 12px 22px;
+  margin-top: 4px;
+  cursor: pointer;
+}
+
+/* recovery: vor allem anderen, ganzflächig im Display (§8). */
+.recovery {
+  display: grid;
+  gap: clamp(14px, 2vw, 26px);
+  align-content: center;
+  height: 100%;
+}
+.recovery__headline {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--screen-text);
+  font-size: clamp(18px, 2.4vw, 34px);
+  line-height: 1.4;
+}
+.recovery__options { display: grid; gap: 12px; grid-auto-flow: column; justify-content: start; }
+.recovery__option {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 14px;
+  color: var(--screen);
+  background: var(--screen-text);
+  border: none;
+  border-radius: var(--radius-screen);
+  padding: 10px 18px;
+  cursor: pointer;
+}
+.recovery__option--ghost {
+  color: var(--screen-text);
+  background: transparent;
+  border: var(--hairline) solid var(--screen-text);
+}
+
+/* StorageManager (U11) — ruhige Mono-Liste, gleiche Sprache. */
+.storage-manager { font-family: var(--font-mono); font-feature-settings: "zero" 1; }
+
+/* ── U19 Mode-Umschalter (net-new, nicht in ui-spezifikation-local-only.md —
+   siehe ModeToggle.tsx-Kopfkommentar; Owner-Design-Review offen). Sitzt
+   ausserhalb des Displays, gegen --bg, darum die invertierte Farblogik der
+   Screen-Knöpfe (first-run__action etc.): Ruhe = --ink auf --bg, aktiv
+   umgekehrt. ────────────────────────────────────────────────────────────── */
+/* Hält die Zeile im Bühnen-Grid frei, auch wenn nicht umgeschaltet werden darf
+   (Download/Import/Recovery) — sonst rutscht das Display beim Klick auf
+   „Modell laden" nach oben und die ganze Seite springt. */
+.stage__toggle[data-visible="false"] { visibility: hidden; }
+
+.mode-toggle {
+  display: inline-flex;
+  border: var(--hairline) solid var(--ink);
+  border-radius: var(--radius-screen);
+  overflow: hidden;
+}
+.mode-toggle__option {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: clamp(12px, 1.1vw, 14px);
+  color: var(--ink);
+  background: var(--bg);
+  border: none;
+  padding: 8px 18px;
+  cursor: pointer;
+}
+.mode-toggle__option + .mode-toggle__option {
+  border-left: var(--hairline) solid var(--ink);
+}
+.mode-toggle__option--active {
+  color: var(--bg);
+  background: var(--ink);
+}
+
+/* ── U19 ImportView im Display — gleiche Sprache wie .first-run (net-new,
+   siehe ImportView.tsx-Kopfkommentar). ──────────────────────────────────── */
+.import-view { display: grid; gap: 12px; }
+.import-view__message {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--screen-text);
+  font-size: clamp(14px, 1.7vw, 24px);
+  line-height: 1.6;
+}
+.import-view__action {
+  justify-self: start;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: clamp(14px, 1.6vw, 18px);
+  color: var(--screen);
+  background: var(--screen-text);
+  border: none;
+  border-radius: var(--radius-screen);
+  padding: 12px 22px;
+  margin-top: 4px;
+  cursor: pointer;
+}
+.import-view__action:disabled { opacity: 0.5; cursor: not-allowed; }
+.import-view__selected {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  color: var(--screen-dim);
+  font-size: clamp(13px, 1.4vw, 18px);
+}
+
+/* ── Plan 003 MeetingView + RecordSetupView — same screen language as
+      .import-view (one device: folder-first landing, then start) ──────────── */
+.meeting-view,
+.setup-view { display: grid; gap: 12px; }
+.meeting-view__message,
+.setup-view__message {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--screen-text);
+  font-size: clamp(14px, 1.7vw, 24px);
+  line-height: 1.6;
+}
+/* Knopf + Erklärung nebeneinander: eine Zeile UNTER dem Knopf läge auf halber
+   Breite hinter dem Aufnahmeknopf, der über die Displayunterkante ragt.
+   Zwei Spalten, zwei Zeilen: die Knöpfe stehen untereinander in Spalte 1 (die
+   deshalb so breit ist wie der breitere von beiden — daher gleiche Breite),
+   die Erklärung sitzt in Zeile 1 daneben und richtet sich damit am WEISSEN
+   Knopf aus, nicht an der Mitte des Stapels. */
+.setup-view__row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  justify-content: start;
+  align-items: center;
+  row-gap: 10px;
+  column-gap: clamp(12px, 1.6vw, 24px);
+}
+/* `justify-self: stretch` MUSS hier stehen: die geteilte Knopf-Regel
+   (.meeting-view__action, .setup-view__action) setzt `start`, womit der weisse
+   Knopf seine Eigenbreite behielte und der rote — der die Spaltenbreite
+   bestimmt — breiter aussähe. Beide füllen die Spalte, beide sind gleich. */
+.setup-view__row > .setup-view__action {
+  grid-area: 1 / 1;
+  justify-self: stretch;
+  text-align: center;
+  max-width: 30ch;
+}
+.setup-view__row > .setup-view__note   { grid-area: 1 / 2; }
+/* ── Die Nebenzeilen unter der Schlagzeile (Owner-Feedback 2026-07-26) ─────
+   Alle Zusatzzeilen der drei Landeansichten teilen sich EINE Grösse. Vorher
+   war „Kopfhörer empfohlen" (13–18 px) deutlich grösser als der
+   Einwilligungssatz (12–15 px) direkt darunter — zwei Nebensätze in zwei
+   Grössen, die Stufung sagte etwas aus, was nicht stimmt. Eine Deklaration
+   für alle, damit sie beim nächsten Zusatz nicht wieder auseinanderlaufen. */
+.setup-view__note,
+.meeting-view__aside,
+.setup-view__aside,
+.meeting-view__hint,
+.consent-note {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  font-size: clamp(12px, 1.2vw, 15px);
+  line-height: 1.5;
+}
+.setup-view__note { max-width: 42ch; }
+
+/* Die Helligkeit trägt jetzt die Rangfolge, nicht die Grösse: gedimmt ist
+   alles Beiläufige (Speicherort-Bestätigung, Kopfhörer-Hinweis, die
+   Dateien-Erklärung) …
+   `.setup-view__note` war hell — die Zeile „Speicherort: … Mikrofon
+   freigegeben." ist aber eine Quittung über etwas Erledigtes und braucht die
+   Aufmerksamkeit nicht (Owner-Feedback). */
+.setup-view__note,
+.meeting-view__aside,
+.setup-view__aside { color: var(--screen-dim); }
+
+/* … hell ist, was noch eine Entscheidung des Menschen davor verlangt: die
+   Fehler-Wiederholung und — U6/KTD11 — der Einwilligungssatz an beiden
+   Aufnahmewegen (`RecordSetupView.tsx`, `MeetingView.tsx`). Er steht
+   zwischen zwei gedimmten Zeilen und hebt sich dadurch ab, ohne lauter zu
+   werden: immer noch ein Hinweis, kein Fehler — kein Warnrot, kein Symbol,
+   kein `role="alert"` (das ist `.meeting-view__hint`, eine andere Sache). */
+.meeting-view__hint,
+.consent-note { color: var(--screen-text); }
+.meeting-view__action,
+.setup-view__action {
+  justify-self: start;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: clamp(14px, 1.6vw, 18px);
+  color: var(--screen);
+  background: var(--screen-text);
+  border: none;
+  border-radius: var(--radius-screen);
+  padding: 12px 22px;
+  margin-top: 4px;
+  cursor: pointer;
+}
+
+/* ── Plan 003 record-only meeting — in-call screen + cumulative dots ──────── */
+.meeting-recording { display: grid; gap: 14px; align-content: center; }
+.meeting-recording__label {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--screen-text);
+  font-size: clamp(18px, 2.4vw, 32px);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.meeting-recording__hint {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  color: var(--screen-dim);
+  font-size: clamp(12px, 1.4vw, 18px);
+  line-height: 1.5;
+}
+.dots { display: inline-flex; gap: 6px; }
+.dots__dot {
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: var(--screen-dim);
+  opacity: 0.25;
+  transition: opacity 120ms linear;
+}
+.dots__dot--on { background: var(--screen-text); opacity: 1; }
+/* Reassurance line on the importing screen once a long transcription runs a while. */
+.first-run__progress-label--note {
+  color: var(--screen-dim);
+  line-height: 1.5;
+  max-width: 42ch;
+}
+
+/* ── Phase D (U18) diarization result — speaker-labeled log + rename roster ─ */
+.annotation-status {
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--screen-dim);
+  font-size: clamp(12px, 1.3vw, 16px);
+}
+.annotation-status--error {
+  color: var(--screen-text);
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+/* Transcription-language dropdown (LanguageSelect) — shared by all three landings. */
+.language-select {
+  justify-self: start;
+  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.language-select__label {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--screen-dim);
+  font-size: clamp(11px, 1.2vw, 14px);
+}
+.language-select__control {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  font-size: clamp(12px, 1.3vw, 15px);
+  color: var(--screen-text);
+  background: transparent;
+  border: var(--hairline) solid var(--screen-dim);
+  border-radius: var(--radius-screen);
+  padding: 5px 9px;
+  cursor: pointer;
+}
+.language-select__control option {
+  /* Native dropdown lists render on the OS layer — force readable colors there
+     (a transparent background inherits the page's dark screen unpredictably). */
+  color: #111;
+  background: #fff;
+}
+
+/* Round 5: annotate controls — the known-speaker-count chips + the action, one row. */
+.annotation-controls {
+  justify-self: start;
+  align-self: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 12px;
+}
+.annotation-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.annotation-count__label {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--screen-dim);
+  font-size: clamp(11px, 1.2vw, 14px);
+  margin-right: 4px;
+}
+.annotation-count__chip {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  font-size: clamp(12px, 1.3vw, 15px);
+  color: var(--screen-text);
+  background: transparent;
+  border: var(--hairline) solid var(--screen-dim);
+  border-radius: var(--radius-screen);
+  padding: 5px 11px;
+  cursor: pointer;
+}
+.annotation-count__chip--active {
+  color: var(--screen);
+  background: var(--screen-text);
+  border-color: var(--screen-text);
+}
+/* On-demand "Sprecher erkennen" button (hybrid timing) — same screen language as .import-view__action. */
+.annotation-action {
+  justify-self: start;
+  align-self: start;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: clamp(13px, 1.5vw, 17px);
+  color: var(--screen);
+  background: var(--screen-text);
+  border: none;
+  border-radius: var(--radius-screen);
+  padding: 10px 20px;
+  cursor: pointer;
+}
+.speaker-view { display: grid; gap: 14px; overflow-y: auto; }
+.speaker-view__roster {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  border-bottom: var(--hairline) solid var(--screen-dim);
+}
+.speaker-view__roster-item { display: inline-flex; align-items: center; gap: 6px; }
+.speaker-view__roster-item label {
+  font-family: var(--font-mono);
+  font-size: clamp(11px, 1.1vw, 13px);
+  color: var(--screen-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.speaker-view__name-input {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  font-size: clamp(12px, 1.3vw, 16px);
+  color: var(--screen-text);
+  background: transparent;
+  border: none;
+  border-bottom: var(--hairline) solid var(--screen-dim);
+  padding: 2px 4px;
+  min-width: 6ch;
+}
+.speaker-view__turns { display: grid; gap: 10px; }
+.speaker-view__turn {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  color: var(--screen-text);
+  font-size: clamp(13px, 1.5vw, 20px);
+  line-height: 1.55;
+}
+.speaker-view__turn-name {
+  color: var(--screen-dim);
+  margin-right: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Reduzierte Bewegung (§9): kein Blinken, kein Übergang ───────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .screen__cursor,
+  .transcript__cursor { animation: none; }
+
+  .panel-wrap,
+  .screen,
+  .led,
+  .device__head,
+  .foot__left,
+  .vu { transition: none; }
+
+  /* Chrome verschwindet ohne Fahrt (Sprung statt Übergang) — aber der kleine
+     "offRecord"-Schriftzug bleibt (nur foot__left in Aufnahme ganz weg). Der
+     Kopf selbst NICHT display:none, sonst verschwindet auch der Titel. */
+  .device[data-state="recording"] .foot__left { transform: none; display: none; }
+}
+
+/* ── Mobil < 900px: Display voll breit, VU waagrecht über dem Display (§9) ── */
+@media (max-width: 900px) {
+  .device__title { font-size: clamp(48px, 16vw, 80px); }
+  .panel-wrap { max-width: 100%; }
+  .device[data-state="recording"] .panel-wrap,
+  .device[data-state="stopped"]   .panel-wrap { max-width: 100%; }
+  /* Bei voller Displaybreite ist seitlich kein Platz: der Pegel legt sich
+     waagrecht über das Display, rechtsbündig unter das Mikrofonmodul. */
+  .mic-level {
+    top: auto;
+    left: auto;
+    right: 0;
+    bottom: calc(100% + 10px);
+    transform: none;
+    grid-auto-flow: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .vu { grid-auto-flow: row; justify-content: center; }
+  .vu__col { grid-auto-flow: column; }
+}

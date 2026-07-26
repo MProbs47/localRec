@@ -1,0 +1,23 @@
+# Cloudflare Pages security headers (KTD9, KTD12).
+#
+# Source of truth for the CSP directives is src/trust/csp.ts; this file is
+# hand-kept in sync with it and checked for drift by src/trust/csp.test.ts.
+#
+# https://huggingface.co, https://*.hf.co (the Xet weight CDN — regional hosts
+# like us.aws.cdn.hf.co / eu.aws.cdn.hf.co, see src/trust/csp.ts) and the older
+# https://cdn-lfs*.huggingface.co hosts in connect-src are the ONLY allowed
+# third-party origins in this entire policy, and only for the one-time model
+# downloads (Whisper onnx-community/whisper-large-v3-turbo + the Phase D
+# diarization set). No other outgoing connection is technically possible
+# (R10) — "nichts verlässt das Gerät".
+#
+# Deliberately NOT set: Cross-Origin-Opener-Policy, Cross-Origin-Embedder-Policy.
+# WebGPU does not need cross-origin isolation, and `require-corp` would break
+# the model download from the HF LFS CDN (KTD4). Do not add them back without
+# re-reading KTD4.
+/*
+  Content-Security-Policy: default-src 'self'; connect-src 'self' https://huggingface.co https://*.hf.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co https://cdn-lfs-eu-1.huggingface.co; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+  Permissions-Policy: camera=(), geolocation=(), microphone=(self)
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
