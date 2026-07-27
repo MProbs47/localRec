@@ -9,6 +9,7 @@ import {
   canCaptureSystemAudio,
   captureSystemAudio,
   SystemAudioError,
+  type DisplayMediaConstraintsLike,
   type MediaStreamLike,
   type MediaStreamTrackLike,
   type SystemAudioDeps,
@@ -53,6 +54,35 @@ function depsWithStream(stream: FakeMediaStream): SystemAudioDeps {
 }
 
 describe('captureSystemAudio (KTD-M1: request video+audio, discard video, keep audio-only stream)', () => {
+  // Owner feedback (2026-07-27): every step the picker can skip is one the
+  // user doesn't have to find. These hints are the only lever the platform
+  // offers — the "Systemaudio freigeben" checkbox itself is Chrome's alone
+  // (see `DISPLAY_MEDIA_CONSTRAINTS`). Asserted here so a later edit can't
+  // silently drop them back to a bare `{audio:true, video:true}`.
+  it('asks the picker to open on the screen pane, with system audio offered and this tab hidden', async () => {
+    const stream = new FakeMediaStream([new FakeTrack()], [new FakeTrack()]);
+    const seen: DisplayMediaConstraintsLike[] = [];
+
+    await captureSystemAudio({
+      mediaDevices: {
+        getDisplayMedia: async (constraints) => {
+          seen.push(constraints);
+          return stream;
+        },
+      },
+    });
+
+    expect(seen).toEqual([
+      {
+        audio: true,
+        video: { displaySurface: 'monitor' },
+        systemAudio: 'include',
+        selfBrowserSurface: 'exclude',
+        surfaceSwitching: 'exclude',
+      },
+    ]);
+  });
+
   it('stops and removes the video track, keeping only the audio track', async () => {
     const videoTrack = new FakeTrack();
     const audioTrack = new FakeTrack();

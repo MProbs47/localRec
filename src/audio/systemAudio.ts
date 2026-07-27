@@ -41,8 +41,22 @@ export interface MediaStreamLike {
   removeTrack(track: MediaStreamTrackLike): void;
 }
 
+/**
+ * What `captureSystemAudio` asks the picker for. Only `audio`/`video` are
+ * load-bearing (KTD-M1: Chromium hands out audio only alongside a video
+ * surface); the rest are **hints** that shorten the dialog — the browser may
+ * ignore any of them, which is why nothing downstream depends on them.
+ */
+export interface DisplayMediaConstraintsLike {
+  audio: boolean;
+  video: boolean | { displaySurface?: 'monitor' | 'window' | 'browser' };
+  systemAudio?: 'include' | 'exclude';
+  selfBrowserSurface?: 'include' | 'exclude';
+  surfaceSwitching?: 'include' | 'exclude';
+}
+
 export interface MediaDevicesLike {
-  getDisplayMedia(constraints: { audio: boolean; video: boolean }): Promise<MediaStreamLike>;
+  getDisplayMedia(constraints: DisplayMediaConstraintsLike): Promise<MediaStreamLike>;
 }
 
 export interface SystemAudioDeps {
@@ -63,6 +77,44 @@ export class SystemAudioError extends Error {
   }
 }
 
+/**
+ * The one request this module makes — a named constant so the test can nail
+ * it down (owner feedback 2026-07-27: "je weniger Schritte der User machen
+ * muss").
+ *
+ * `audio: true` + a video surface is the load-bearing part (KTD-M1). The
+ * other three only pre-sort the dialog, and each is a *wish* the browser may
+ * ignore — capture works exactly as before if it does:
+ * - `video: { displaySurface: 'monitor' }` opens the picker on «Gesamter
+ *   Bildschirm» instead of Chrome's own default tab. That is the pane that
+ *   matters here: a Teams/Zoom **desktop app** is only audible via system
+ *   audio; sharing a browser tab would capture that tab, not the call.
+ * - `systemAudio: 'include'` asks for the system-audio option to be offered
+ *   at all (already Chrome's default; stated so a future default change
+ *   can't quietly take the checkbox away).
+ * - `selfBrowserSurface: 'exclude'` drops this app's own tab from the list —
+ *   picking it would record silence and is never what anyone wants.
+ * - `surfaceSwitching: 'exclude'` hides "share a different surface" mid-run:
+ *   swapping the source under a running recording has no meaning here.
+ *
+ * **What is NOT possible, so nobody looks for it again:** the site cannot
+ * pre-tick "Systemaudio freigeben". There is no such API — Chrome alone owns
+ * that checkbox (and starts it unchecked for a screen, checked for a tab),
+ * because a page that could turn on audio capture by itself would be a
+ * wiretap. The picker itself is likewise unskippable: every call needs a
+ * fresh user gesture and shows the dialog, with no persistent grant. That
+ * makes the forgotten checkbox a permanent failure mode, which is exactly
+ * why `'no-audio-track'` below stays a first-class, explained outcome
+ * instead of a generic error.
+ */
+export const DISPLAY_MEDIA_CONSTRAINTS: DisplayMediaConstraintsLike = {
+  audio: true,
+  video: { displaySurface: 'monitor' },
+  systemAudio: 'include',
+  selfBrowserSurface: 'exclude',
+  surfaceSwitching: 'exclude',
+};
+
 /** `getDisplayMedia` error names that mean "the user cancelled the picker" — not a real failure (KTD-M1). */
 const ABORT_ERROR_NAMES = new Set(['NotAllowedError', 'AbortError']);
 
@@ -76,8 +128,9 @@ function getGlobalMediaDevices(): MediaDevicesLike | undefined {
 
 /**
  * Requests system-/meeting-audio (Teams/Zoom desktop share) and returns an
- * audio-only `MediaStream`. Always asks for `{audio:true,video:true}`
- * (Chromium requirement, KTD-M1), then discards the video side immediately.
+ * audio-only `MediaStream`. Always asks with `DISPLAY_MEDIA_CONSTRAINTS`
+ * (audio + a video surface is the Chromium requirement, KTD-M1; the rest
+ * only pre-sorts the picker), then discards the video side immediately.
  *
  * Throws `SystemAudioError('aborted', …)` if the user cancels the picker,
  * `SystemAudioError('no-audio-track', …)` if they forgot the system-audio
@@ -92,7 +145,7 @@ export async function captureSystemAudio(deps: SystemAudioDeps = {}): Promise<Me
 
   let stream: MediaStreamLike;
   try {
-    stream = await mediaDevices.getDisplayMedia({ audio: true, video: true });
+    stream = await mediaDevices.getDisplayMedia(DISPLAY_MEDIA_CONSTRAINTS);
   } catch (error) {
     const name = errorName(error);
     if (name && ABORT_ERROR_NAMES.has(name)) {
