@@ -170,7 +170,7 @@ export const es: Record<StringKey, string> = {
 
   'clear.withRefresh': 'Borrar y recargar',
   'clear.withRefreshHint':
-    'Elimina las grabaciones guardadas localmente y recarga la página. Los archivos de la carpeta elegida permanecen.',
+    'Elimina las grabaciones guardadas localmente, vuelve a descargar la aplicación del servidor y recarga la página. Los archivos de la carpeta elegida y los modelos descargados permanecen.',
 
   'vu.label': 'IN',
 

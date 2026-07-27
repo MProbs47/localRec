@@ -173,7 +173,7 @@ export const fr: Record<StringKey, string> = {
 
   'clear.withRefresh': 'Effacer et recharger',
   'clear.withRefreshHint':
-    'Supprime les enregistrements mis en cache localement et recharge la page. Les fichiers du dossier choisi restent.',
+    'Supprime les enregistrements mis en cache localement, récupère une version fraîche de l’application et recharge la page. Les fichiers du dossier choisi et les modèles téléchargés restent.',
 
   'vu.label': 'IN',
 

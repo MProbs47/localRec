@@ -152,7 +152,7 @@ export const de: Record<StringKey, string> = {
 
   'clear.withRefresh': 'Löschen & neu laden',
   'clear.withRefreshHint':
-    'Löscht die lokal zwischengespeicherten Aufnahmen und lädt die Seite neu. Die Dateien im gewählten Ordner bleiben.',
+    'Löscht die lokal zwischengespeicherten Aufnahmen, holt die App frisch vom Server und lädt neu. Die Dateien im gewählten Ordner und die geladenen Modelle bleiben.',
 
   'vu.label': 'IN',
 

@@ -169,7 +169,7 @@ export const it: Record<StringKey, string> = {
 
   'clear.withRefresh': 'Cancella e ricarica',
   'clear.withRefreshHint':
-    'Elimina le registrazioni memorizzate localmente e ricarica la pagina. I file nella cartella scelta restano.',
+    'Elimina le registrazioni memorizzate localmente, scarica di nuovo l’app dal server e ricarica la pagina. I file nella cartella scelta e i modelli scaricati restano.',
 
   'vu.label': 'IN',
 

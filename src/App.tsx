@@ -88,6 +88,7 @@ import { VuMeter } from './ui/VuMeter';
 import { RecordingCoordinator, type RecorderStarter } from './session/recordingCoordinator';
 import { SessionStore, type SessionRecord } from './storage/sessionStore';
 import { findCrashCandidates, recoverSession } from './storage/recovery';
+import { clearAppShellCache } from './storage/appShellCache';
 import { WakeLockController, getBrowserWakeLockProvider } from './runtime/wakeLock';
 import {
   createFileSink,
@@ -386,6 +387,17 @@ export default function App() {
   // so there is no surviving in-flight annotation to invalidate. The wipe is
   // best-effort — a failing IndexedDB/OPFS delete must not swallow the
   // refresh the label promises.
+  //
+  // **Owner feedback (2026-07-27): the reload now really is a fresh app.**
+  // The same click also drops the PWA's cached app shell and its service
+  // worker (`clearAppShellCache`, which owns the rationale and the
+  // never-throws contract). Without that step, "neu laden" meant the
+  // precached OLD bundle for at least one more reload — the browsers' fix
+  // for that is Ctrl+Shift+R, which testers can't be expected to know.
+  // Deliberately NOT dropped there either: the models (~1.5 GB, OPFS) and
+  // the ONNX-Runtime WASM — same "expensive downloads stay" line as above.
+  // It runs after the try/catch, not inside it, precisely because it cannot
+  // throw: a failed session wipe must not cost the tester the fresh code.
   const handleClearAndRefresh = useCallback(() => {
     void (async () => {
       try {
@@ -394,6 +406,7 @@ export default function App() {
       } catch {
         // best effort — fall through to the reload either way
       }
+      await clearAppShellCache();
       window.location.reload();
     })();
   }, []);

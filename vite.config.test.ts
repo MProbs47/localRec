@@ -9,6 +9,7 @@ import {
 } from './vite.config';
 import viteConfig from './vite.config';
 import { CSP_HEADER_STRING } from './src/trust/csp';
+import { KEPT_CACHE_NAMES } from './src/storage/appShellCache';
 
 // U1 test scenario 1: the build must not be able to precache the ~1.5 GB
 // Whisper model (KTD5). We assert on the *config shape* rather than running
@@ -101,6 +102,17 @@ describe('pwaOptions (vite.config.ts)', () => {
           sameOrigin: true,
         }),
       ).toBeFalsy();
+    });
+
+    // The «Löschen & neu laden» engraving wipes Cache Storage except the
+    // names in `KEPT_CACHE_NAMES` (`src/storage/appShellCache.ts`). That list
+    // is a plain string copy of the cacheName below — if either side is
+    // renamed alone, the wipe would delete the very cache this rule fills:
+    // a needless 23 MB re-download and a broken airplane-mode run until the
+    // next online session. This test is the only thing tying the two files
+    // together, so keep it.
+    it('uses the cacheName that appShellCache.ts is told to keep', () => {
+      expect(KEPT_CACHE_NAMES).toContain(wasmRule?.options?.cacheName);
     });
   });
 });

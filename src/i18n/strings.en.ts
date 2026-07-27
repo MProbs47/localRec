@@ -248,12 +248,16 @@ export const en = {
   // The "clear with refresh" engraving under the display's bottom-left
   // corner (`App.tsx`'s `handleClearAndRefresh`) — replaces S2's red
   // "Delete all recordings" button and its confirmation row. One click:
-  // wipe the locally cached recordings, then reload. The hint spells out
-  // what survives, because the label alone can't: the exported files in the
-  // chosen folder are the truth (CLAUDE.md) and are never touched.
+  // wipe the locally cached recordings AND the cached app shell
+  // (`storage/appShellCache.ts` — so the reload really brings the current
+  // build, without anyone needing to know Ctrl+Shift+R), then reload. The
+  // hint spells out what survives, because the label alone can't: the
+  // exported files in the chosen folder are the truth (CLAUDE.md) and are
+  // never touched, and neither are the downloaded models (~1.5 GB — the one
+  // thing nobody wants to fetch twice).
   'clear.withRefresh': 'Clear with refresh',
   'clear.withRefreshHint':
-    'Deletes the locally cached recordings and reloads the page. The files in your chosen folder stay.',
+    'Deletes the locally cached recordings, fetches the app fresh from the server and reloads. The files in your chosen folder and the downloaded models stay.',
 
   // `VuMeter.tsx`'s default column label — device chrome (rule 4).
   'vu.label': 'IN',

@@ -801,6 +801,7 @@ describe('App state machine (U9)', () => {
 
     afterEach(() => {
       Object.defineProperty(window, 'location', { configurable: true, value: realLocation });
+      Reflect.deleteProperty(globalThis, 'caches');
     });
 
     it('"Löschen & neu laden" wipes SessionStore + the OPFS fallback artifacts, then reloads the page', async () => {
@@ -815,6 +816,39 @@ describe('App state machine (U9)', () => {
       await waitFor(() => expect(reloadMock).toHaveBeenCalledTimes(1));
       expect(latestSessionStore().deleteAllSessions).toHaveBeenCalledTimes(1);
       expect(deleteFallbackArtifactsMock).toHaveBeenCalledTimes(1);
+    });
+
+    // Owner feedback (2026-07-27): the same click must also make the reload
+    // bring the CURRENT build. Without the app-shell wipe, the precached old
+    // bundle survives at least one more reload and only a hard reload
+    // (Ctrl+Shift+R — not something a tester knows) breaks the tie. Cache
+    // Storage doesn't exist in jsdom, so the real API surface is defined here
+    // rather than mocking the module away; `onnx-runtime-wasm` is in the list
+    // to prove the expensive download is spared end-to-end, not just in
+    // `appShellCache.test.ts`.
+    it('also drops the cached app shell — but never the ONNX-Runtime WASM cache', async () => {
+      const deleted: string[] = [];
+      Object.defineProperty(globalThis, 'caches', {
+        configurable: true,
+        value: {
+          keys: async () => ['workbox-precache-v2-https://localrec.pages.dev/', 'onnx-runtime-wasm'],
+          delete: async (name: string) => {
+            deleted.push(name);
+            return true;
+          },
+        },
+      });
+
+      render(<App />);
+      await flush();
+      fireEvent.click(screen.getByRole('button', { name: 'Modell laden' }));
+      act(() => latestEngine().setStatus('ready', { progress: 1 }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Speicherort wählen' })).toBeInTheDocument());
+
+      fireEvent.click(screen.getByRole('button', { name: 'Löschen & neu laden' }));
+
+      await waitFor(() => expect(reloadMock).toHaveBeenCalledTimes(1));
+      expect(deleted).toEqual(['workbox-precache-v2-https://localrec.pages.dev/']);
     });
 
     it('a failing wipe still reloads — the refresh the label promises is never swallowed by a storage error', async () => {
