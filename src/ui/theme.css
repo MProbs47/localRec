@@ -1446,3 +1446,49 @@ body {
   .vu { grid-auto-flow: row; justify-content: center; }
   .vu__col { grid-auto-flow: column; }
 }
+
+/* ── Flacher Bildschirm ≤ 800px Höhe (Testperson-Bug, Edge 2026-07-27) ─────
+   Gemeldet mit überlappenden Gravuren: «Löschen & neu laden» lag auf der
+   Schrittliste, «So funktioniert es» auf dem Zeitzähler. Kein Gerätefehler —
+   ein 1920×1200-Laptop auf Windows' EMPFOHLENEN 150 % ergibt rund 1270×630
+   CSS-Pixel. Die Breite ist unkritisch (der 900px-Block oben greift gar
+   nicht), die Höhe war es: bis hierher gab es zur Höhe keine einzige Regel.
+
+   Warum es überhaupt überlappen KANN: Kopf, Bühne und Fusszeile sind je
+   absolut verankert (§4, damit das einfahrende Chrome keine Layout-Lücke
+   hinterlässt). Nichts steht im Fluss, also schiebt auch nichts etwas
+   anderes weg — geht die Höhe aus, wandern die Bänder ineinander statt sich
+   zu stauchen. Die Untergrenzen der drei Masse hörten dabei zu früh auf
+   mitzuschrumpfen (Reserveband 210px, Ruhe-Display 180px, Titel 64px),
+   zusammen etwa 15px mehr als vorhanden.
+
+   Die Antwort ist bewusst nur ein Nachziehen dieser Grenzen, kein Umbau auf
+   ein Fluss-Layout: die abgenommene Komposition bleibt bei normaler
+   Fensterhöhe Zeichen für Zeichen dieselbe, und die vh-Mittelwerte tragen
+   den Rest — die neuen Böden greifen erst unter ~500px. */
+@media (max-height: 800px) {
+  .device { --pad: clamp(14px, 2.4vw, 28px); }
+
+  /* Höhen- statt Breitenmass: auf einem breiten, flachen Schirm wäre 11vw
+     der grösste Titel überhaupt, und er sitzt genau im knappen Band. */
+  .device__title { font-size: clamp(44px, 10vh, 96px); }
+
+  /* Das Reserveband über dem Display (Titel + Untertitel + Moduswahl). */
+  .device[data-state="ready"] .stage,
+  .device[data-state="idle"] .stage,
+  .device[data-state="downloading"] .stage,
+  .device[data-state="error"] .stage,
+  .device[data-state="recovery"] .stage { padding-top: clamp(132px, 26vh, 240px); }
+
+  .screen { height: clamp(120px, 22vh, 260px); }
+  .device[data-state="recording"] .screen,
+  .device[data-state="stopped"]   .screen { height: clamp(200px, 52vh, 680px); }
+
+  /* Die Gravuren rücken mit — sie hängen am Displayrand, nicht am Raster. */
+  .panel__engraving { bottom: -21px; font-size: 12px; }
+  .device[data-state="stopped"] .panel__engraving { bottom: auto; top: -21px; }
+
+  /* Drei Zeilen Schrittliste, enger gesetzt: der Fuss ist die Gegenkante,
+     an der die Gravuren zuerst anstiessen. */
+  .step { padding: 2px 0; }
+}
