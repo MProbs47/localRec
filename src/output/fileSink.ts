@@ -191,7 +191,7 @@ export interface DirectoryHandleLike {
 
 /** The real global surface this file needs from `showDirectoryPicker` — reached through an injectable env, defaulting to `globalThis`, same pattern as `recorder.ts`'s `getMediaRecorderCtor`. */
 export interface FileSystemAccessEnvLike {
-  showDirectoryPicker?: () => Promise<DirectoryHandleLike>;
+  showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<DirectoryHandleLike>;
 }
 
 function getGlobalEnv(): FileSystemAccessEnvLike {
@@ -698,13 +698,30 @@ async function ensureReadWritePermission(dir: DirectoryHandleLike): Promise<Perm
  * production; injected via `deps.env` in tests), persists the resulting
  * handle for the next reload (R6-Fortsetzung), and returns the live-mirror
  * sink (R6, AE1).
+ *
+ * **`mode: 'readwrite'` ist Pflicht, nicht Kosmetik** (Testperson-Bug,
+ * 2026-07-27: «Failed to execute 'getFileHandle' … User activation is
+ * required to request permissions»). Ohne die Option vergibt der Browser
+ * nur Leserecht; der ERSTE Schreibzugriff (`openFile` →
+ * `getFileHandle(..., { create: true })`) fordert die Erlaubnis dann
+ * implizit nach — und eine Erlaubnisabfrage braucht eine frische
+ * Nutzeraktion (Chrome: ~5 s nach dem Klick). Beim Import liegt zwischen
+ * Dateiklick und erstem Schreibzugriff das Dekodieren der ganzen Datei
+ * (`importPipeline.ts`: decode → `coordinator.start()`), bei einer grossen
+ * Datei also mehr als dieses Fenster: der Import starb mit obiger Meldung.
+ * Mit `readwrite` fragt der Browser einmal im Klick auf «Ordner wählen» —
+ * dort ist die Aktivierung garantiert da — und jeder spätere Schreibzugriff
+ * ist gedeckt (nebenbei entfällt die zweite Systemabfrage beim
+ * Aufnahme-Start). `queryPermission`/`requestPermission` in
+ * `ensureReadWritePermission` fragen aus demselben Grund schon immer nach
+ * `'readwrite'`.
  */
 export async function createFileSink(deps: FileSinkDependencies = {}): Promise<FileSink> {
   const env = deps.env ?? getGlobalEnv();
   if (!hasFileSystemAccess(env)) {
     return new FallbackSink(deps.fallbackFileOpener, deps.commitOptions);
   }
-  const dir = await env.showDirectoryPicker!();
+  const dir = await env.showDirectoryPicker!({ mode: 'readwrite' });
   const repository = deps.repository ?? getDefaultRepository();
   await repository.save(dir);
   return new FileSystemAccessSink(dir, deps.fallbackFileOpener, deps.commitOptions);

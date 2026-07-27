@@ -183,6 +183,23 @@ function envWithPicker(dir: DirectoryHandleLike): FileSystemAccessEnvLike {
   return { showDirectoryPicker: async () => dir };
 }
 
+/** Same picker, but records the options it was called with — for the `mode: 'readwrite'` assertion below. */
+function recordingEnvWithPicker(dir: DirectoryHandleLike): {
+  env: FileSystemAccessEnvLike;
+  calls: ({ mode?: 'read' | 'readwrite' } | undefined)[];
+} {
+  const calls: ({ mode?: 'read' | 'readwrite' } | undefined)[] = [];
+  return {
+    env: {
+      showDirectoryPicker: async (options) => {
+        calls.push(options);
+        return dir;
+      },
+    },
+    calls,
+  };
+}
+
 const envWithoutPicker: FileSystemAccessEnvLike = {};
 
 // ============================================================================
@@ -209,6 +226,20 @@ describe('createFileSink (test scenario 1, AE1)', () => {
     expect(sink.kind).toBe('live-mirror');
     expect(sink).toBeInstanceOf(FileSystemAccessSink);
     await expect(repository.load()).resolves.toBe(dir);
+  });
+
+  // Regression (Testperson-Bug 2026-07-27): without `mode: 'readwrite'` the
+  // browser hands out a read-only handle, and the first write asks for the
+  // permission implicitly — which needs a fresh user activation and therefore
+  // died with "User activation is required to request permissions" whenever
+  // something slow (an import's decode) sat between the click and that write.
+  it("asks the picker for 'readwrite' up front, inside the choosing click", async () => {
+    const dir = new FakeDirectoryHandle();
+    const { env, calls } = recordingEnvWithPicker(dir);
+
+    await createFileSink({ env, repository: new InMemoryDirectoryHandleRepository() });
+
+    expect(calls).toEqual([{ mode: 'readwrite' }]);
   });
 
   it('returns the fallback sink when File System Access is unavailable — no user configuration involved', async () => {
