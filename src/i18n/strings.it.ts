@@ -79,11 +79,12 @@ export const it: Record<StringKey, string> = {
 
   'common.retry': 'Riprova',
 
-  'import.needsFolderMessage': 'Scegli prima una posizione — lì verrà scritta la trascrizione.',
+  'import.needsFolderMessage': 'Manca la posizione — lì verrà scritta la trascrizione. Poi si parte.',
   'import.message':
     "Carica un file audio esistente — elaborato interamente sul dispositivo. Niente lascia il tuo dispositivo.",
   'import.pickFile': 'Scegli file',
   'import.selected': 'Selezionato: «{name}» — elaborazione in corso …',
+  'import.selectedPending': 'Scelto: «{name}»',
 
   'setup.chooseFolder': 'Scegli cartella',
 
@@ -104,6 +105,8 @@ export const it: Record<StringKey, string> = {
   'meeting.recordingLabel': 'Registrazione in corso',
   'meeting.recordingHint':
     "Microfono e audio della riunione vengono registrati. Trascrizione e parlanti seguono dopo lo stop.",
+  'meeting.micSilentHint':
+    "Nessun segnale dal microfono — viene registrata solo la controparte. La registrazione prosegue. Controlla il dispositivo di ingresso (le cuffie Bluetooth cambiano spesso modalità all'inizio di una chiamata) oppure riavvia la registrazione.",
 
   'meeting.needsFolderMessage': 'Scegli prima una posizione — poi avvia la riunione.',
   'meeting.shareInstruction': 'Premi «Registra», poi nella finestra di condivisione scegli «Schermo intero» e attiva «Condividi audio».',

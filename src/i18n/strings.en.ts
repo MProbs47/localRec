@@ -111,12 +111,16 @@ export const en = {
   'common.retry': 'Try again',
 
   // `ImportView.tsx`.
+  // Step 2 of the import since the owner's 2026-07-27 reversal (file first,
+  // folder second) — so no longer "first", and it says what happens next.
   'import.needsFolderMessage':
-    'Choose a storage location first — the transcription is written there.',
+    'Now the storage location — the transcription is written there. Then it starts.',
   'import.message':
     'Load an existing audio file — processed fully on-device. Nothing leaves your device.',
   'import.pickFile': 'Choose file',
   'import.selected': 'Selected: «{name}» — processing …',
+  // The same file, but at the folder step: nothing is processing yet.
+  'import.selectedPending': 'Chosen: «{name}»',
 
   // Shared "Ordner wählen" key (approach step 4) — `ImportView.tsx`'s and
   // `MeetingView.tsx`'s folder-first gate button. One key, one call site's
@@ -155,6 +159,12 @@ export const en = {
   'meeting.recordingLabel': 'Recording',
   'meeting.recordingHint':
     'Mic + meeting audio are being captured. Transcription & speakers follow after stop.',
+  // Replaces the hint above once `LiveCapture`'s mic watch reports silence
+  // (`MeetingRecordingView.tsx`). Names the likely culprit, because the
+  // browser can't fix it and the user can: Bluetooth headsets switch modes
+  // when a call starts and can leave the mic delivering nothing.
+  'meeting.micSilentHint':
+    'No signal from the microphone — only the other side is being recorded. Recording continues. Check your input device (Bluetooth headsets like to switch modes when a call starts), or restart the recording.',
 
   // `MeetingView.tsx`.
   'meeting.needsFolderMessage': 'Choose a storage location first — then start the meeting.',

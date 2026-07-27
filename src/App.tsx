@@ -208,6 +208,10 @@ export default function App() {
   // RecordButton and the screen's "Erneut versuchen" both re-attempt in place).
   // Cleared on a fresh record attempt and on a mode switch.
   const [micDenied, setMicDenied] = useState(false);
+  // Meeting mode: true once `LiveCapture`'s mic watch reported that the
+  // microphone branch stayed silent (see `startMeeting`'s `onMicSilence`).
+  // Only a warning ON the recording screen — the recording keeps running.
+  const [micSilent, setMicSilent] = useState(false);
   // Record mode: true from the moment `prepareRecording` (folder + mic) has run
   // until the recording actually starts — the window in which the screen tells
   // the user the remaining step is the red button (hardware test 01, finding
@@ -287,6 +291,13 @@ export default function App() {
   // A previously chosen output folder restored on mount (R6) — reused so a
   // recording start doesn't re-prompt the picker when a grant already exists.
   const restoredSinkRef = useRef<FileSink | null>(null);
+
+  // Import, step 1 of 2 (owner decision 2026-07-27): the picked file waits
+  // here while the user chooses the output folder; `handleChooseImportFolder`
+  // launches it. A ref, not state — nothing renders from it, and the value
+  // must survive the folder picker's await without re-rendering the screen
+  // the user is currently clicking through.
+  const parkedImportRef = useRef<PickedAudioFile | null>(null);
 
   // The U12a recording lifecycle (output/persistence/wake-lock), driven by the
   // start/stop handlers below. Built once; `createSink` prefers the restored
@@ -564,11 +575,18 @@ export default function App() {
   }, [pendingAnnotation, runAnnotation, speakerCount]);
 
   // U20b (Opus decision A, the gesture trap): opens the output folder from
-  // ImportView's own "Ordner wählen" click — its OWN user gesture, separate
-  // from the later file-picker click, because `showDirectoryPicker` and
-  // `showOpenFilePicker` each need one. Mirrors `startRecording`'s existing
-  // "restoredSinkRef wins, else open a fresh picker" shape, just triggered
-  // explicitly instead of implicitly inside `coordinator.start()`.
+  // ImportView's own "Speicherort wählen" click — its OWN user gesture,
+  // separate from the file-picker click before it, because
+  // `showDirectoryPicker` and `showOpenFilePicker` each need one. Mirrors
+  // `startRecording`'s existing "restoredSinkRef wins, else open a fresh
+  // picker" shape, just triggered explicitly instead of implicitly inside
+  // `coordinator.start()`.
+  //
+  // Owner decision 2026-07-27 (file first, folder second — see
+  // `ImportView.tsx`'s header): this is now the LAST step of an import, so
+  // it also launches the run for a file that was parked while no folder
+  // existed. The park/launch pair lives here rather than in `ImportView`
+  // because only App owns the pipeline.
   const handleChooseImportFolder = useCallback(() => {
     void createFileSink()
       .then((sink) => {
@@ -576,13 +594,18 @@ export default function App() {
         setHasOutputTarget(true);
         setOutputName(sink.name ?? null);
         setSinkIsFallback(sink.kind === 'fallback');
+
+        const parked = parkedImportRef.current;
+        parkedImportRef.current = null;
+        if (parked) processAudioBlob(parked.blob, true);
       })
       .catch(() => {
-        // Picker cancelled or failed — ImportView simply stays on "Ordner
-        // wählen"; no error UI for a cancel (same posture as `startRecording`'s
-        // own picker-cancel handling).
+        // Picker cancelled or failed — ImportView stays on "Speicherort
+        // wählen" WITH the picked file still parked, so the next click
+        // resumes exactly where the user left off; no error UI for a cancel
+        // (same posture as `startRecording`'s own picker-cancel handling).
       });
-  }, []);
+  }, [processAudioBlob]);
 
   // Hardware test 01, finding 1: record mode is folder-first now, like meeting
   // mode always was (KTD-M6). The old first press asked for the MICROPHONE and
@@ -618,13 +641,23 @@ export default function App() {
   }, []);
 
   // U20b: runs a picked file through the shared post-hoc pipeline
-  // (`processAudioBlob` above — decode → transcribe → annotate). `ImportView`
-  // only ever calls this once `hasOutputTarget` is true (its own gate, decision
-  // A), so `coordinator.start()`'s `createSink` always resolves the already-open
-  // sink, no second picker mid-import.
+  // (`processAudioBlob` above — decode → transcribe → annotate).
+  //
+  // Owner decision 2026-07-27 (file first, folder second): with a folder
+  // already set the run starts right here, exactly as before. Without one,
+  // the file is PARKED and `handleChooseImportFolder` starts it the moment
+  // the folder resolves — starting now would mean `coordinator.start()`'s
+  // `createSink` opening a second picker mid-import, which the two-gesture
+  // rule forbids (`ImportView.tsx`'s header).
   const handleFileSelected = useCallback(
-    (file: PickedAudioFile) => processAudioBlob(file.blob, true), // import → annotate right away (user present)
-    [processAudioBlob],
+    (file: PickedAudioFile) => {
+      if (!hasOutputTarget) {
+        parkedImportRef.current = file;
+        return;
+      }
+      processAudioBlob(file.blob, true); // import → annotate right away (user present)
+    },
+    [hasOutputTarget, processAudioBlob],
   );
 
   // U7: wires Engine's raw `final` segment stream to the two sinks the old
@@ -980,9 +1013,18 @@ export default function App() {
     // catch) tears both back down, nothing half-open. No `onPcm`: record-only,
     // the meeting isn't transcribed live (keeps the GPU free for the meeting
     // app during the call) — RMS still drives the VU meter internally.
+    //
+    // `onMicSilence` (owner feedback 2026-07-27, a real lost recording): the
+    // VU meter shows mic AND remote side summed, so a microphone that
+    // delivers nothing — a Bluetooth headset stuck in playback-only mode is
+    // enough — looks perfectly healthy while only the other person is being
+    // recorded. LiveCapture watches the mic branch alone and says so once,
+    // ~8s in; the recording deliberately keeps running (half a meeting beats
+    // none, and only the user can decide whether to restart).
     const liveCapture = liveCaptureRef.current!;
+    setMicSilent(false);
     try {
-      await liveCapture.start({ mic, system });
+      await liveCapture.start({ mic, system, onMicSilence: () => setMicSilent(true) });
 
       // Record the MIX, tapping chunks for the post-hoc transcribe+diarize pass.
       const startRecorder: RecorderStarter = (onChunk) => {
@@ -1138,7 +1180,7 @@ export default function App() {
 
     if (deviceState === 'recording') {
       // Plan 003 record-only meeting: no live transcript (see MeetingRecordingView.tsx).
-      if (mode === 'meeting') return <MeetingRecordingView />;
+      if (mode === 'meeting') return <MeetingRecordingView micSilent={micSilent} />;
       // §6: the live transcript. `interimActive` stays false — Whisper has no
       // interim tier (KTD-W2), no interim is ever fed.
       return <LiveTranscript store={transcriptStoreRef.current!} interimActive={false} />;

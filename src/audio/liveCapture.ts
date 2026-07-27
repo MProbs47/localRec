@@ -22,7 +22,9 @@
  * recording, not a literal no-op). Behavior falls out of which options are
  * present: `onPcm` present (Local Recording) → the ring buffer + 200 ms feed
  * interval run; `onPcm` absent (Online Meeting) → PCM is dropped but the
- * worklet's RMS still drives `getLevel()` for the VU meter.
+ * worklet's RMS still drives `getLevel()` for the VU meter;
+ * `onMicSilence` present (Online Meeting) → the mic-only monitor + its watch
+ * run (see `MIC_SILENCE_THRESHOLD` and the owner story behind it).
  *
  * **Ownership handoff at `start()`.** The caller acquires `mic`/`system`
  * (each capture needs its own permission prompt / gesture) and owns them
@@ -49,6 +51,29 @@ export const RING_BUFFER_CAPACITY_SAMPLES = 16_000 * 5;
 /** How often the feed loop drains the ring buffer into `onPcm` — only runs when a live transcription feed is wired (see the class doc). */
 export const AUDIO_FEED_INTERVAL_MS = 200;
 
+/**
+ * Mic-silence watch (owner feedback 2026-07-27) — the three numbers behind
+ * `onMicSilence`. A Bluetooth headset can stay in playback-only mode when a
+ * call starts: the mic device exists, `getUserMedia` succeeds, and the track
+ * delivers pure silence for the whole session. In a meeting that is
+ * invisible, because the VU meter shows mic AND remote side summed
+ * (`mixStreams.ts`'s `MicMonitorNode`) and the remote side keeps it moving.
+ *
+ * `MIC_SILENCE_THRESHOLD` is peak amplitude, not RMS: a real room floor
+ * (fan, breathing, the mic's own noise) peaks well above 0.004 ≈ -48 dBFS,
+ * while a dead device sits at exact zero. Deliberately far below anything
+ * resembling speech — this must answer "is the device delivering ANYTHING",
+ * never "is someone talking", or it would fire at every quiet moment.
+ *
+ * `MIC_SILENCE_GRACE_MS` is how long the watch stays quiet after `start()`.
+ * Long enough that a slow device (Bluetooth profile switching takes seconds)
+ * isn't accused too early, short enough to still save the recording.
+ */
+export const MIC_SILENCE_THRESHOLD = 0.004;
+export const MIC_SILENCE_GRACE_MS = 8_000;
+/** How often the watch samples the monitor while the grace window runs. */
+export const MIC_WATCH_INTERVAL_MS = 250;
+
 /** Shape posted by the AudioWorklet (`worklet-processor.js`): PCM to the ring buffer, RMS to the VU meter. */
 export interface WorkletMessage {
   pcm: Float32Array;
@@ -67,9 +92,17 @@ export interface WorkletNodeLike extends AudioNodeLike {
   disconnect(): void;
 }
 
-/** `mixStreams.ts`'s `AudioContextLike` plus the worklet-module load and context teardown this module additionally needs. */
+/** The narrow slice of `AnalyserNode` the mic-silence watch reads — a tap on the mic branch (`mixStreams.ts`'s `MicMonitorNode`). */
+export interface MicMonitorNodeLike extends AudioNodeLike {
+  readonly fftSize: number;
+  getFloatTimeDomainData(array: Float32Array): void;
+  disconnect(): void;
+}
+
+/** `mixStreams.ts`'s `AudioContextLike` plus the worklet-module load, mic monitor and context teardown this module additionally needs. */
 export interface LiveCaptureAudioContextLike extends AudioContextLike {
   audioWorklet: { addModule(moduleUrl: string): Promise<void> };
+  createAnalyser(): MicMonitorNodeLike;
   close(): Promise<void>;
 }
 
@@ -80,6 +113,10 @@ export interface LiveCaptureDeps {
   loadWorkletModule?: (ctx: LiveCaptureAudioContextLike) => Promise<void>;
   /** Creates the `pcm-capture-processor` node on `ctx`. Defaults to `new AudioWorkletNode(ctx, 'pcm-capture-processor')`. */
   createWorkletNode?: (ctx: LiveCaptureAudioContextLike) => WorkletNodeLike;
+  /** Creates the mic-silence monitor on `ctx`. Defaults to `ctx.createAnalyser()`. */
+  createMicMonitor?: (ctx: LiveCaptureAudioContextLike) => MicMonitorNodeLike;
+  /** Reads elapsed milliseconds for the mic-silence grace window. Defaults to `Date.now` (injectable so tests don't wait 8 real seconds). */
+  now?: () => number;
   /** Injectable timer (tests). Defaults to `window.setInterval`. */
   setIntervalImpl?: (handler: () => void, ms: number) => number;
   /** Injectable timer (tests). Defaults to `window.clearInterval`. */
@@ -93,6 +130,14 @@ export interface LiveCaptureStartOptions {
   system?: MediaStream | null;
   /** Present → live transcription feed (Local Recording): the ring buffer + 200ms interval run, calling this with each drained chunk. Absent → Online Meeting: PCM is dropped, only `getLevel()` keeps updating. */
   onPcm?: (chunk: Float32Array) => void;
+  /**
+   * Present → watch the mic branch alone and call this ONCE if it delivered
+   * nothing but silence for `MIC_SILENCE_GRACE_MS` (see those constants).
+   * Never called again afterwards, and never called at all once any signal
+   * was seen — the watch stops sampling the moment it has its answer, in
+   * either direction. Absent → no monitor node is created at all.
+   */
+  onMicSilence?: () => void;
 }
 
 function defaultCreateAudioContext(): LiveCaptureAudioContextLike {
@@ -108,6 +153,10 @@ function defaultCreateWorkletNode(ctx: LiveCaptureAudioContextLike): WorkletNode
   return new AudioWorkletNode(ctx as unknown as AudioContext, 'pcm-capture-processor') as unknown as WorkletNodeLike;
 }
 
+function defaultCreateMicMonitor(ctx: LiveCaptureAudioContextLike): MicMonitorNodeLike {
+  return ctx.createAnalyser();
+}
+
 /**
  * The live audio-capture graph a Recording Session owns while active — see
  * the file header for the full design. One instance is constructed per
@@ -120,11 +169,15 @@ export class LiveCapture {
   readonly #createAudioContext: () => LiveCaptureAudioContextLike;
   readonly #loadWorkletModule: (ctx: LiveCaptureAudioContextLike) => Promise<void>;
   readonly #createWorkletNode: (ctx: LiveCaptureAudioContextLike) => WorkletNodeLike;
+  readonly #createMicMonitor: (ctx: LiveCaptureAudioContextLike) => MicMonitorNodeLike;
+  readonly #now: () => number;
   readonly #setInterval: (handler: () => void, ms: number) => number;
   readonly #clearInterval: (id: number) => void;
 
   #ctx: LiveCaptureAudioContextLike | null = null;
   #worklet: WorkletNodeLike | null = null;
+  #micMonitor: MicMonitorNodeLike | null = null;
+  #micWatchIntervalId: number | null = null;
   #mic: MediaStream | null = null;
   #system: MediaStream | null = null;
   #mixTeardown: (() => void) | null = null;
@@ -136,6 +189,8 @@ export class LiveCapture {
     this.#createAudioContext = deps.createAudioContext ?? defaultCreateAudioContext;
     this.#loadWorkletModule = deps.loadWorkletModule ?? defaultLoadWorkletModule;
     this.#createWorkletNode = deps.createWorkletNode ?? defaultCreateWorkletNode;
+    this.#createMicMonitor = deps.createMicMonitor ?? defaultCreateMicMonitor;
+    this.#now = deps.now ?? (() => Date.now());
     this.#setInterval = deps.setIntervalImpl ?? ((handler, ms) => window.setInterval(handler, ms));
     this.#clearInterval = deps.clearIntervalImpl ?? ((id) => window.clearInterval(id));
   }
@@ -163,7 +218,7 @@ export class LiveCapture {
    * (`stop()`, idempotent-safe against partial state) before rethrowing, so
    * the caller never has to reason about a half-built graph.
    */
-  async start({ mic, system, onPcm }: LiveCaptureStartOptions): Promise<void> {
+  async start({ mic, system, onPcm, onMicSilence }: LiveCaptureStartOptions): Promise<void> {
     this.#mic = mic;
     this.#system = system ?? null;
 
@@ -183,9 +238,18 @@ export class LiveCapture {
         ringBuffer?.write(pcm);
       };
 
-      const { recordStream, teardown } = connectMixedSources(ctx, { mic, system: this.#system }, worklet);
+      // Only built when someone asked to be told (Online Meeting) — Local
+      // Recording's VU meter already IS the mic, nothing to disambiguate.
+      const micMonitor = onMicSilence ? this.#createMicMonitor(ctx) : undefined;
+      this.#micMonitor = micMonitor ?? null;
+
+      const { recordStream, teardown } = connectMixedSources(ctx, { mic, system: this.#system }, worklet, micMonitor);
       this.#recordStream = recordStream;
       this.#mixTeardown = teardown;
+
+      if (micMonitor && onMicSilence) {
+        this.#startMicWatch(micMonitor, onMicSilence);
+      }
 
       if (onPcm && ringBuffer) {
         this.#feedIntervalId = this.#setInterval(() => {
@@ -201,6 +265,43 @@ export class LiveCapture {
   }
 
   /**
+   * Samples the mic-only monitor every `MIC_WATCH_INTERVAL_MS` until it has
+   * an answer, then stops sampling — either because signal was seen (the
+   * device works, nothing to report, ever) or because the grace window
+   * expired with nothing but silence (report once). Both outcomes are
+   * terminal, so the watch costs nothing for the rest of a long meeting.
+   */
+  #startMicWatch(monitor: MicMonitorNodeLike, onMicSilence: () => void): void {
+    const startedAt = this.#now();
+    const samples = new Float32Array(monitor.fftSize);
+
+    this.#micWatchIntervalId = this.#setInterval(() => {
+      // A tick can still be queued when the watch has already answered (both
+      // outcomes clear the interval, and `stop()` clears it too) — without
+      // this guard such a straggler could report silence a second time, or
+      // report it at all after the watch was disarmed.
+      if (this.#micWatchIntervalId === null) return;
+      monitor.getFloatTimeDomainData(samples);
+      for (const sample of samples) {
+        if (Math.abs(sample) > MIC_SILENCE_THRESHOLD) {
+          this.#stopMicWatch(); // the mic is alive — done watching
+          return;
+        }
+      }
+      if (this.#now() - startedAt >= MIC_SILENCE_GRACE_MS) {
+        this.#stopMicWatch();
+        onMicSilence();
+      }
+    }, MIC_WATCH_INTERVAL_MS);
+  }
+
+  #stopMicWatch(): void {
+    if (this.#micWatchIntervalId === null) return;
+    this.#clearInterval(this.#micWatchIntervalId);
+    this.#micWatchIntervalId = null;
+  }
+
+  /**
    * Full teardown, idempotent (a second/pre-`start()` call is a safe no-op):
    * clears the feed interval, disconnects the mix source nodes, closes the
    * worklet port + disconnects the node, stops BOTH `mic` and `system`
@@ -212,8 +313,11 @@ export class LiveCapture {
       this.#clearInterval(this.#feedIntervalId);
       this.#feedIntervalId = null;
     }
+    this.#stopMicWatch();
     this.#mixTeardown?.();
     this.#mixTeardown = null;
+    this.#micMonitor?.disconnect();
+    this.#micMonitor = null;
     this.#worklet?.port.close();
     this.#worklet?.disconnect();
     this.#worklet = null;

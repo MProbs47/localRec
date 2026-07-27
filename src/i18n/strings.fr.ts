@@ -79,11 +79,12 @@ export const fr: Record<StringKey, string> = {
 
   'common.retry': 'Réessayer',
 
-  'import.needsFolderMessage': "Choisis d'abord un emplacement — la transcription y sera écrite.",
+  'import.needsFolderMessage': "Reste l'emplacement — la transcription y sera écrite. Ensuite, ça démarre.",
   'import.message':
     "Charge un fichier audio existant — traité entièrement sur l'appareil. Rien ne quitte ton appareil.",
   'import.pickFile': 'Choisir un fichier',
   'import.selected': 'Sélectionné : « {name} » — traitement en cours …',
+  'import.selectedPending': 'Choisi : « {name} »',
 
   'setup.chooseFolder': 'Choisir un dossier',
 
@@ -104,6 +105,8 @@ export const fr: Record<StringKey, string> = {
   'meeting.recordingLabel': 'Enregistrement en cours',
   'meeting.recordingHint':
     "Le micro et l'audio de la réunion sont enregistrés. La transcription et les locuteurs suivent après l'arrêt.",
+  'meeting.micSilentHint':
+    "Aucun signal du microphone — seul votre interlocuteur est enregistré. L'enregistrement continue. Vérifiez le périphérique d'entrée (les casques Bluetooth changent souvent de mode au début d'un appel) ou relancez l'enregistrement.",
 
   'meeting.needsFolderMessage': "Choisis d'abord un emplacement — puis démarre la réunion.",
   'meeting.shareInstruction': 'Appuie sur « Enregistrer », puis dans la fenêtre de partage choisis « Écran entier » et coche « Partager l\'audio ».',

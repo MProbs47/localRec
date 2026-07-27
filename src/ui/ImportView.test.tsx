@@ -109,25 +109,50 @@ describe('ImportView', () => {
     expect(onFileSelected).toHaveBeenCalledTimes(2);
   });
 
-  describe('(U20b) folder-first gate', () => {
-    it('withholds the file picker while no output folder is set, offering only "Ordner wählen"', () => {
-      const onChooseFolder = vi.fn();
+  // Owner decision 2026-07-27: file first, folder second — first WHAT gets
+  // processed, then WHERE the result goes (see the component's header).
+  describe('(U20b) file first, folder second', () => {
+    it('offers the file picker first, with no folder step in the way', () => {
       const { getByRole, queryByRole } = render(
-        <ImportView onFileSelected={() => {}} hasOutputTarget={false} onChooseFolder={onChooseFolder} />,
+        <ImportView onFileSelected={() => {}} hasOutputTarget={false} onChooseFolder={() => {}} />,
       );
 
-      expect(queryByRole('button', { name: 'Datei wählen' })).toBeNull();
-      fireEvent.click(getByRole('button', { name: 'Ordner wählen' }));
+      expect(getByRole('button', { name: 'Datei wählen' })).not.toBeNull();
+      expect(queryByRole('button', { name: 'Speicherort wählen' })).toBeNull();
+    });
+
+    it('asks for the folder once a file is picked and none is set, naming the picked file', async () => {
+      const onChooseFolder = vi.fn();
+      const { getByRole, findByText } = render(
+        <ImportView
+          onFileSelected={() => {}}
+          pickFile={async () => file('sitzung.m4a')}
+          hasOutputTarget={false}
+          onChooseFolder={onChooseFolder}
+        />,
+      );
+
+      fireEvent.click(getByRole('button', { name: 'Datei wählen' }));
+
+      await findByText(/sitzung\.m4a/); // the file stays named through step 2
+      fireEvent.click(getByRole('button', { name: 'Speicherort wählen' }));
       expect(onChooseFolder).toHaveBeenCalledTimes(1);
     });
 
-    it('shows the normal file picker once an output folder is set', () => {
-      const { getByRole, queryByRole } = render(
-        <ImportView onFileSelected={() => {}} hasOutputTarget onChooseFolder={() => {}} />,
+    it('never asks for the folder again when one is already set (second import of a session)', async () => {
+      const { getByRole, queryByRole, findByText } = render(
+        <ImportView
+          onFileSelected={() => {}}
+          pickFile={async () => file('zweite.wav')}
+          hasOutputTarget
+          onChooseFolder={() => {}}
+        />,
       );
 
-      expect(queryByRole('button', { name: 'Ordner wählen' })).toBeNull();
-      expect(getByRole('button', { name: 'Datei wählen' })).not.toBeNull();
+      fireEvent.click(getByRole('button', { name: 'Datei wählen' }));
+      await findByText(/zweite\.wav/);
+
+      expect(queryByRole('button', { name: 'Speicherort wählen' })).toBeNull();
     });
   });
 

@@ -43,6 +43,19 @@ export interface MixStreamsInput {
   system?: MediaStream | null;
 }
 
+/**
+ * An extra node that receives the **mic alone** (owner feedback 2026-07-27).
+ * The worklet's RMS — and with it the VU meter — sees the SUM of both
+ * sources, so during a meeting a dead microphone is drowned out by the
+ * remote side: the meter keeps moving, and you only notice afterwards that
+ * your own voice is missing (a Bluetooth headset that silently stayed in its
+ * playback-only mode is enough to cause it). A monitor tapped off the mic
+ * branch before the sum is the only place that difference is visible.
+ * Optional — Local Recording has nothing to disambiguate (one source, the
+ * meter IS the mic) and passes nothing.
+ */
+export type MicMonitorNode = AudioNodeLike;
+
 export interface ConnectedMixedSources {
   /** The stream `startOpusRecorder` should record — the destination node's `.stream`. */
   recordStream: MediaStream;
@@ -55,25 +68,34 @@ export interface ConnectedMixedSources {
  * sources connect to `workletNode` (transcription/VU, unchanged pipeline)
  * and to a fresh `MediaStreamAudioDestinationNode` (recording). Returns that
  * destination's `.stream` plus a `teardown` that disconnects the created
- * source nodes — the destination/worklet nodes themselves are owned by the
- * caller and outlive this call.
+ * source nodes — the destination/worklet/monitor nodes themselves are owned
+ * by the caller and outlive this call.
+ *
+ * `micMonitor` (optional) additionally receives the mic source alone — see
+ * `MicMonitorNode` for why that tap has to sit before the sum.
  */
 export function connectMixedSources(
   ctx: AudioContextLike,
   streams: MixStreamsInput,
   workletNode: AudioNodeLike,
+  micMonitor?: MicMonitorNode,
 ): ConnectedMixedSources {
   const dest = ctx.createMediaStreamDestination();
   const sources: MediaStreamAudioSourceNodeLike[] = [];
 
-  const wire = (stream: MediaStream) => {
+  const wire = (stream: MediaStream, extra?: AudioNodeLike) => {
     const source = ctx.createMediaStreamSource(stream);
     source.connect(workletNode);
     source.connect(dest);
+    // The mic monitor hangs off the mic source only, BEFORE anything is
+    // summed — that is the whole point (see `MicMonitorNode`). It is a pure
+    // tap: nothing is routed onward from it, so it can neither colour the
+    // recording nor the transcription feed.
+    if (extra) source.connect(extra);
     sources.push(source);
   };
 
-  wire(streams.mic);
+  wire(streams.mic, micMonitor);
   if (streams.system) {
     wire(streams.system);
   }

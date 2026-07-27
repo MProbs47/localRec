@@ -246,6 +246,13 @@ vi.mock('./session/diarizationRun', () => ({
   runDiarization: vi.fn(async () => ({ aligned: [], timeline: [], diarized: true })),
 }));
 
+// Import mode's file dialog — `showOpenFilePicker` doesn't exist under jsdom
+// and the `<input type=file>` fallback can't be driven meaningfully, so the
+// picker itself is faked and the ORDER of the two steps is what gets tested.
+vi.mock('./input/audioFileSource', () => ({
+  pickAudioFile: vi.fn(async () => ({ name: 'sitzung.m4a', blob: new Blob(['audio']) })),
+}));
+
 vi.mock('./output/writeSpeakerTranscripts', () => ({
   writeSpeakerTranscripts: vi.fn(async () => {}),
 }));
@@ -462,9 +469,51 @@ function switchToMeetingMode() {
   fireEvent.click(screen.getByRole('radio', { name: 'Online Meeting' }));
 }
 
+/** `reachReady()` without the folder step — the state an import now starts from. */
+async function reachReadyWithoutFolder() {
+  render(<App />);
+  await flush();
+  fireEvent.click(screen.getByRole('button', { name: 'Modell laden' }));
+  act(() => latestEngine().setStatus('ready', { progress: 1 }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Speicherort wählen' })).toBeInTheDocument());
+  fireEvent.click(screen.getByRole('radio', { name: 'Datei laden' }));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+// Owner decision 2026-07-27: an import asks WHAT first and WHERE second. The
+// park/launch pair that makes the reversal possible lives in App (the file
+// waits in a ref while the folder picker runs), so the order is locked here
+// and not only in `ImportView.test.tsx`.
+describe('import: file first, folder second', () => {
+  it('parks the picked file until the folder resolves, then runs exactly one import', async () => {
+    await reachReadyWithoutFolder();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Datei wählen' }));
+
+    // Step 1 done, nothing started: starting here would need a second picker
+    // inside the same gesture, which the browser forbids.
+    const chooseLocation = await screen.findByRole('button', { name: 'Speicherort wählen' });
+    expect(runImportMock).not.toHaveBeenCalled();
+    expect(screen.getByText(/sitzung\.m4a/)).toBeInTheDocument();
+
+    fireEvent.click(chooseLocation);
+
+    await waitFor(() => expect(runImportMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('starts immediately on the file click when a folder is already set (second import)', async () => {
+    await reachReady(); // this one DOES choose a folder
+    fireEvent.click(screen.getByRole('radio', { name: 'Datei laden' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Datei wählen' }));
+
+    await waitFor(() => expect(runImportMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('button', { name: 'Speicherort wählen' })).toBeNull();
+  });
+});
 
 describe('App state machine (U9)', () => {
   describe('baseline: record mode start -> stop', () => {

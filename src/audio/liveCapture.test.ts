@@ -12,6 +12,7 @@ import {
   RING_BUFFER_CAPACITY_SAMPLES,
   type LiveCaptureAudioContextLike,
   type LiveCaptureDeps,
+  type MicMonitorNodeLike,
   type WorkletMessage,
   type WorkletNodeLike,
 } from './liveCapture';
@@ -86,13 +87,39 @@ class FakeWorkletNode implements WorkletNodeLike {
   }
 }
 
+/**
+ * The mic-only tap (`mixStreams.ts`'s `MicMonitorNode`). `samples` is what
+ * the watch will read — a test sets it to silence or to signal and drives
+ * the interval by hand.
+ */
+class FakeMicMonitor implements MicMonitorNodeLike {
+  readonly fftSize = 4;
+  samples = new Float32Array(4); // all zeros = a dead microphone
+  disconnected = false;
+  getFloatTimeDomainData(array: Float32Array): void {
+    array.set(this.samples.subarray(0, array.length));
+  }
+  connect(): void {
+    // nothing is routed onward from a monitor — it is a pure tap
+  }
+  disconnect(): void {
+    this.disconnected = true;
+  }
+}
+
 class FakeAudioContext implements LiveCaptureAudioContextLike {
   createdSources: FakeSourceNode[] = [];
   destinationStream = { id: 'dest-stream' } as unknown as MediaStream;
   lastDest: FakeDestinationNode | null = null;
+  lastAnalyser: FakeMicMonitor | null = null;
   closed = false;
   addModule = vi.fn(async (_moduleUrl: string) => {});
   audioWorklet = { addModule: (url: string) => this.addModule(url) };
+
+  createAnalyser(): MicMonitorNodeLike {
+    this.lastAnalyser = new FakeMicMonitor();
+    return this.lastAnalyser;
+  }
 
   createMediaStreamSource(stream: MediaStream): MediaStreamAudioSourceNodeLike {
     const node = new FakeSourceNode(stream);
@@ -167,6 +194,91 @@ describe('LiveCapture (U6: the live audio-capture graph behind one seam)', () =>
 
     capture.stop();
     expect(capture.getLevel()).toBe(0);
+  });
+
+  // Owner feedback (2026-07-27, a half-lost meeting): the mic branch alone,
+  // because the VU meter shows it summed with the remote side.
+  describe('mic-silence watch (onMicSilence)', () => {
+    /** A harness with a hand-driven clock, so the 8s grace window costs no real time. */
+    function micWatchHarness() {
+      let clock = 0;
+      const harness = makeHarness({ now: () => clock });
+      return { ...harness, advance: (ms: number) => (clock += ms) };
+    }
+
+    it('reports once when the mic branch stayed silent past the grace window', async () => {
+      const { ctx, intervalHandlers, capture, advance } = micWatchHarness();
+      const { stream: mic } = fakeStream('mic');
+      const { stream: system } = fakeStream('system');
+      const onMicSilence = vi.fn();
+
+      await capture.start({ mic, system, onMicSilence });
+      // The monitor hangs off the MIC source only — never the system source.
+      expect(ctx.createdSources[0].connectedTo).toContain(ctx.lastAnalyser);
+      expect(ctx.createdSources[1].connectedTo).not.toContain(ctx.lastAnalyser);
+
+      intervalHandlers[0](); // inside the grace window: silence is not yet news
+      expect(onMicSilence).not.toHaveBeenCalled();
+
+      advance(8_000);
+      intervalHandlers[0]();
+      expect(onMicSilence).toHaveBeenCalledTimes(1);
+
+      // Terminal: the watch stopped sampling, so a later tick can't repeat it.
+      intervalHandlers[0]();
+      expect(onMicSilence).toHaveBeenCalledTimes(1);
+    });
+
+    it('never reports once the mic delivered signal, however long the meeting runs', async () => {
+      const { ctx, intervalHandlers, capture, advance } = micWatchHarness();
+      const { stream: mic } = fakeStream('mic');
+      const onMicSilence = vi.fn();
+
+      await capture.start({ mic, onMicSilence });
+      ctx.lastAnalyser!.samples = new Float32Array([0, 0.2, 0, -0.1]); // someone spoke
+      intervalHandlers[0]();
+
+      ctx.lastAnalyser!.samples = new Float32Array(4); // and then went quiet for a while
+      advance(60_000);
+      intervalHandlers[0]();
+
+      expect(onMicSilence).not.toHaveBeenCalled();
+    });
+
+    it('treats a floor below the threshold as silence (a dead device, not a quiet room)', async () => {
+      const { ctx, intervalHandlers, capture, advance } = micWatchHarness();
+      const { stream: mic } = fakeStream('mic');
+      const onMicSilence = vi.fn();
+
+      await capture.start({ mic, onMicSilence });
+      ctx.lastAnalyser!.samples = new Float32Array([0.001, -0.002, 0.003, 0]);
+
+      advance(8_000);
+      intervalHandlers[0]();
+      expect(onMicSilence).toHaveBeenCalledTimes(1);
+    });
+
+    it('builds no monitor and arms no watch when nobody asked (Local Recording)', async () => {
+      const { ctx, intervalHandlers, capture } = makeHarness();
+      const { stream: mic } = fakeStream('mic');
+
+      await capture.start({ mic }); // no onPcm, no onMicSilence
+
+      expect(ctx.lastAnalyser).toBeNull();
+      expect(intervalHandlers).toHaveLength(0);
+    });
+
+    it('stop() disconnects the monitor and disarms the watch', async () => {
+      const { ctx, clearedIds, capture } = micWatchHarness();
+      const { stream: mic } = fakeStream('mic');
+
+      await capture.start({ mic, onMicSilence: vi.fn() });
+      const monitor = ctx.lastAnalyser!;
+      capture.stop();
+
+      expect(monitor.disconnected).toBe(true);
+      expect(clearedIds).toContain(1); // the watch interval's fake id
+    });
   });
 
   it('getLevel is a stable reference across the instance lifetime', () => {

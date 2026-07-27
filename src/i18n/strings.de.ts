@@ -67,11 +67,12 @@ export const de: Record<StringKey, string> = {
   'common.retry': 'Erneut versuchen',
 
   'import.needsFolderMessage':
-    'Zuerst einen Speicherort wählen — dorthin wird die Transkription geschrieben.',
+    'Noch der Speicherort — dorthin wird die Transkription geschrieben. Danach läuft es los.',
   'import.message':
     'Vorhandene Audiodatei laden — wird vollständig on-device verarbeitet. Nichts verlässt dein Gerät.',
   'import.pickFile': 'Datei wählen',
   'import.selected': 'Ausgewählt: «{name}» — wird verarbeitet …',
+  'import.selectedPending': 'Gewählt: «{name}»',
 
   'setup.chooseFolder': 'Ordner wählen',
 
@@ -91,6 +92,8 @@ export const de: Record<StringKey, string> = {
   'meeting.recordingLabel': 'Aufnahme läuft',
   'meeting.recordingHint':
     'Mikro + Meeting-Ton werden mitgeschnitten. Transkription & Sprecher folgen nach dem Stopp.',
+  'meeting.micSilentHint':
+    'Kein Signal vom Mikrofon — nur die Gegenseite wird aufgezeichnet. Aufnahme läuft weiter. Prüfe das Eingabegerät (Bluetooth-Headsets schalten beim Call gern um) und starte sonst neu.',
 
   'meeting.needsFolderMessage': 'Zuerst einen Speicherort wählen — dann das Meeting starten.',
   'meeting.shareInstruction': '„Aufnahme" drücken, dann im Teilen-Dialog „Ganzer Bildschirm" wählen und „Audio freigeben" ankreuzen.',
