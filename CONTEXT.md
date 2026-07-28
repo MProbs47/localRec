@@ -1,4 +1,4 @@
-# MeetingRecorder
+# localRec
 
 A local-first PWA that captures meeting audio and turns it into a speaker-labelled transcript entirely on-device. This glossary is the ubiquitous language: the words the code, the UI, and we should all use for the same concepts.
 
