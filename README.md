@@ -106,9 +106,8 @@ What the diagram can't show but the architecture rests on:
   buffering rather than lowering quality; only sustained overload past the buffer cap (36 s
   by default) drops the oldest audio — a bounded, recorded gap instead of unbounded memory
   growth. Plus a wake lock against screen sleep.
-- **Models come from the Hugging Face Hub and are cached locally** — the Whisper weights in
-  the browser's Cache API, the diarization models in OPFS — and never in the PWA precache,
-  where they would be orders of magnitude too large.
+- **Models come from the Hugging Face Hub and are cached locally** — in the browser's Cache
+  API, never in the PWA precache, where they would be orders of magnitude too large.
 
 ---
 
@@ -213,8 +212,11 @@ quietly diverge from the real thing.
 > **A note on offline operation:** the ONNX Runtime WASM backend is deliberately _not_
 > precached (it blows past Workbox's 2 MiB limit); it is cached on first load via
 > `runtimeCaching` (CacheFirst) instead. Without that rule the first offline reload would
-> break. The models themselves live in OPFS and in transformers.js' own Cache API bucket,
-> not in the service worker cache.
+> break. The models themselves live in Cache Storage — Whisper and pyannote in
+> transformers.js' own bucket, the WeSpeaker embedder in the app's
+> [`ort-model-cache`](src/storage/ortModelCache.ts) — never in the service worker's
+> precache. Anything that clears Cache Storage has to spare those two by name, or the
+> airplane-mode guarantee dies with the next click on «clear & reload».
 
 ---
 
