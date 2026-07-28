@@ -55,10 +55,25 @@ describe('clearAppShellCache', () => {
 
   // The expensive-download guarantee: a 23 MB re-download (and a broken
   // airplane-mode run until the next online session) is exactly what this
-  // button must not cost. The models themselves live in OPFS and are out of
-  // Cache Storage's reach entirely — see the module header.
-  it('keeps the ONNX-Runtime WASM cache', async () => {
+  // button must not cost.
+  it('keeps every cache on the keep list', async () => {
     const caches = fakeCaches([...KEPT_CACHE_NAMES, 'workbox-precache-v2-x']);
+
+    await clearAppShellCache({ caches, serviceWorker: fakeServiceWorker(0) });
+
+    expect(caches.deleted).toEqual(['workbox-precache-v2-x']);
+  });
+
+  /**
+   * Names the model caches LITERALLY, on purpose — the test above is written
+   * against `KEPT_CACHE_NAMES` itself and therefore passes no matter what that
+   * list contains. Until the offline measurement of 2026-07-28 the list held
+   * only the WASM backend, so this button silently deleted ~1.5 GB of models
+   * while its own header explained why that must never happen. A tautological
+   * assertion cannot catch that; a literal one can.
+   */
+  it('keeps the model caches — the ~1.5 GB download must survive the button', async () => {
+    const caches = fakeCaches(['transformers-cache', 'ort-model-cache', 'workbox-precache-v2-x']);
 
     await clearAppShellCache({ caches, serviceWorker: fakeServiceWorker(0) });
 

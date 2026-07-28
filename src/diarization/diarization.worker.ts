@@ -13,7 +13,9 @@
  *    `post_process_speaker_diarization(logits, num_samples)` returns
  *    `[[ {id,start,end,confidence}, … ]]` (batch → regions, seconds).
  *  - **Embedding** — WeSpeaker via **onnxruntime-web** directly (transformers.js
- *    has no embedding pipeline), features from `features.ts`.
+ *    has no embedding pipeline), features from `features.ts`. Because that also
+ *    means no transformers.js caching, its bytes come through
+ *    `storage/ortModelCache.ts` — see the note at `loadEmbedder` below.
  *
  * HARDWARE-MILESTONE flags (headless-unverifiable, validate on target GPU):
  *  1. transformers.js 4.2.0 pyannote path works end-to-end (feature is young —
@@ -50,6 +52,7 @@ import { WeSpeakerEmbedder, WESPEAKER_MODEL_ID, type OrtSessionLike, type OrtTen
 import { diarize, type DiarizeOptions } from './diarize';
 import type { SpeakerTimeline } from './types';
 import { buildHfResolveUrl } from '../storage/modelCache';
+import { fetchOrtModelCached } from '../storage/ortModelCache';
 import { pinOrtWasmToLocalAssets, resolveOrtNumThreads } from '../worker/model/ortWasmPaths';
 
 // S1 privacy fix (see `ortWasmPaths.ts`'s header). Because the import above
@@ -134,7 +137,13 @@ const engine = new PyannoteWeSpeakerEngine({
 
   async loadEmbedder(onFileProgress) {
     const url = buildHfResolveUrl(WESPEAKER_MODEL_ID, WESPEAKER_ONNX_PATH);
-    const session = await ort.InferenceSession.create(url, { executionProviders: ['wasm'] });
+    // BYTES, not the URL (offline measurement 2026-07-28): handing ORT a URL
+    // makes ORT fetch the file itself, past transformers.js' Cache-Storage
+    // layer — this model was the one file the app re-downloaded on every start,
+    // and the only reason speaker detection died in airplane mode while
+    // transcription ran happily from cache. See `ortModelCache.ts`.
+    const modelBytes = await fetchOrtModelCached(url);
+    const session = await ort.InferenceSession.create(modelBytes, { executionProviders: ['wasm'] });
     // ort's `InferenceSession.create` exposes no download-progress hook, so this
     // step is coarse: report complete once the session is ready.
     onFileProgress(1);

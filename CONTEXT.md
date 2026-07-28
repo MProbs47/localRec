@@ -67,8 +67,17 @@ scaling on target hardware (both headless-unverifiable).
 
 **KTD5** (model never precached): The ~1.5 GB Whisper model is never part of the
 PWA's build-time precache (the service worker's Workbox manifest). It's fetched
-at runtime into the browser's own Cache API (the diarization model set instead
-uses an OPFS downloader), kept fully separate from the app-shell asset pipeline.
+at runtime into the browser's own Cache API, kept fully separate from the
+app-shell asset pipeline. Every model the app has ever kept lives in Cache
+Storage — Whisper and pyannote in transformers.js' own `transformers-cache`,
+the WeSpeaker embedder in this app's `ort-model-cache`
+(`src/storage/ortModelCache.ts`). `modelCache.ts`'s OPFS downloader exists and
+is tested but is wired to no live download; an earlier version of this entry
+claimed the diarization set used it, which cost a night of debugging in the
+wrong place. Two consequences follow and are load-bearing: anything that
+clears Cache Storage must spare those two names (`appShellCache.ts`'s
+`KEPT_CACHE_NAMES`), and the store is evictable — `navigator.storage.persist()`
+is refused on this origin, so a model can disappear under storage pressure.
 
 **KTD7** (feature detection, not a user toggle): Capability differences (e.g.
 whether the File System Access API is available) are resolved by probing what

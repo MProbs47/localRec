@@ -401,8 +401,9 @@ export class Engine {
       .initialize(() => {})
       .catch((error: unknown) => {
         console.info(
-          '[engine] diarization model prefetch failed — harmless, the first ' +
-            'speaker-detection run will download them again:',
+          '[engine] diarization model prefetch failed — the app stays usable, but ' +
+            'speaker detection now needs the network on its first run (offline it ' +
+            'will report SD-3 instead):',
           error,
         );
       });

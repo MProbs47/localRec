@@ -16,11 +16,16 @@
  *
  * **What is deliberately kept.** Only the app shell goes — never the
  * expensive downloads:
- * - The **Whisper/speaker models (~1.5 GB)** aren't reachable from here at
- *   all: they live in OPFS (`modelCache.ts`), not in the Cache Storage this
- *   module touches. Nothing to guard, but worth stating — losing them to a
- *   cache-clearing button would be the single most expensive mistake this
- *   file could make.
+ * - The **Whisper + pyannote models (~1.5 GB)** live in transformers.js'
+ *   `transformers-cache`, and the **WeSpeaker embedder** in this app's own
+ *   `ort-model-cache` (`ortModelCache.ts`) — both in the Cache Storage this
+ *   module wipes, so both are listed in `KEPT_CACHE_NAMES` below. This header
+ *   claimed the opposite until the offline measurement of 2026-07-28 ("they
+ *   live in OPFS, nothing to guard"): `modelCache.ts`'s OPFS store exists but
+ *   is not wired to any live download, so every model this app has ever
+ *   cached has in fact been sitting in Cache Storage, unprotected, one click
+ *   away from a 1.5 GB re-download. Exactly the "single most expensive
+ *   mistake this file could make" the old text warned about while making it.
  * - The **ONNX-Runtime WASM backend** (~23 MB) IS in Cache Storage, under
  *   `KEPT_CACHE_NAMES` below, and is skipped. It is content-hashed and
  *   therefore immutable (a new runtime version means a new URL, i.e. a
@@ -47,15 +52,26 @@
  * discipline as `modelCache.ts`'s `fetchImpl`/`storageGate`, so the logic
  * here is testable without a real service worker.
  */
+import { ORT_MODEL_CACHE_NAME } from './ortModelCache';
 
 /**
- * Cache Storage entries that survive the wipe, by name. Currently just the
- * ONNX-Runtime WASM cache — it must stay byte-identical to
- * `vite.config.ts`'s `runtimeCaching` `cacheName`, or this module would
- * cheerfully delete the very cache that rule fills. `vite.config.test.ts`
- * asserts the two still match, so the coupling can't drift silently.
+ * Cache Storage entries that survive the wipe, by name:
+ *  - `onnx-runtime-wasm` — the ONNX-Runtime WASM backend (~23 MB). Must stay
+ *    byte-identical to `vite.config.ts`'s `runtimeCaching` `cacheName`, or
+ *    this module would cheerfully delete the very cache that rule fills.
+ *    `vite.config.test.ts` asserts the two still match, so the coupling can't
+ *    drift silently.
+ *  - `transformers-cache` — transformers.js' own store, holding the Whisper
+ *    encoder/decoder and the pyannote segmentation model (~1.5 GB). The name
+ *    is the library's, not ours; should a future version rename it, the worst
+ *    case is one extra full download, which is why nothing asserts it.
+ *  - `ort-model-cache` — the WeSpeaker embedder, fetched by this app itself
+ *    (`ortModelCache.ts` owns the constant; imported rather than retyped).
+ *
+ * None of the three is stale-able: every entry is either content-hashed or an
+ * immutable model revision, so keeping them can never serve an old build.
  */
-export const KEPT_CACHE_NAMES: readonly string[] = ['onnx-runtime-wasm'];
+export const KEPT_CACHE_NAMES: readonly string[] = ['onnx-runtime-wasm', 'transformers-cache', ORT_MODEL_CACHE_NAME];
 
 /** The slice of `CacheStorage` this module needs — list the caches, delete some of them. */
 export interface CacheStorageLike {
