@@ -82,10 +82,19 @@ export const pwaOptions: Partial<VitePWAOptions> = {
 
 // Mirrors public/_headers (F4) so `npm run dev`/`vite preview` behave like
 // prod. HSTS is deliberately absent: it is meaningless over plain http.
+//
+// COOP/COEP (KTD4, revised) are included here too, on purpose: they are
+// exactly the kind of header this mirror exists to catch drift on — see this
+// file's own history, both prior production-only bugs (the CSP-on-workers one
+// documented on `PREVIEW_HEADERS` below) were headers present in prod but
+// silently absent locally. `credentialless` costs nothing locally: a plain
+// `npm run dev`/`vite preview` origin has no cross-origin embeds to break.
 export const DEV_PARITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'Permissions-Policy': 'camera=(), geolocation=(), microphone=(self)',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'credentialless',
 };
 
 /**
@@ -237,7 +246,11 @@ function buildOutputGuard(outDir = 'dist'): Plugin {
 export default defineConfig({
   // Cloudflare Pages serves the app from the domain root (KTD12).
   base: '/',
-  plugins: [react(), VitePWA(pwaOptions), buildOutputGuard()],
+  plugins: [
+    react(),
+    VitePWA(pwaOptions),
+    buildOutputGuard(),
+  ],
   server: { headers: DEV_PARITY_HEADERS },
   preview: { headers: PREVIEW_HEADERS },
 });

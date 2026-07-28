@@ -11,13 +11,41 @@
 # diarization set). No other outgoing connection is technically possible
 # (R10) — "nichts verlässt das Gerät".
 #
-# Deliberately NOT set: Cross-Origin-Opener-Policy, Cross-Origin-Embedder-Policy.
-# WebGPU does not need cross-origin isolation, and `require-corp` would break
-# the model download from the HF LFS CDN (KTD4). Do not add them back without
-# re-reading KTD4.
+# Cross-Origin-Opener-Policy / Cross-Origin-Embedder-Policy (KTD4, revised).
+# The original KTD4 shipped WITHOUT these: WebGPU doesn't need cross-origin
+# isolation, and `require-corp` would have tied the Hugging Face model
+# download's redirect chain (huggingface.co -> cdn-lfs*/Xet regional hosts)
+# to header discipline on servers we don't control. (Strictly: CORP gating
+# hits no-cors subresources, and the model downloads are CORS fetches — it
+# would probably have worked. "Probably", on the app's one critical network
+# operation, was the unacceptable part.) That
+# was the right call at the time, and the price was paid in full on real
+# hardware: the diarization worker's ONNX Runtime WASM binary
+# (ort-wasm-simd-threaded.asyncify) can only ever see a `SharedArrayBuffer`
+# under cross-origin isolation, so without COOP/COEP it silently falls back
+# to ONE thread — a 58-minute recording took ~30 min to transcribe (WebGPU,
+# fine) but 58+ min just to annotate speakers (pyannote segmentation +
+# WeSpeaker embeddings, both WASM), at ~13 % CPU on a 14-core machine.
+#
+# `COEP: credentialless` (vs. `require-corp`) is the fix that keeps both
+# constraints satisfied: it isolates the browsing context (SharedArrayBuffer
+# becomes available) WITHOUT requiring a CORP header from cross-origin
+# responses — those responses are instead loaded as if fetched with no
+# credentials, which is exactly what the HF model download already does. No
+# CORS/CORP change on the Hugging Face side is needed, so the download is not
+# put at risk. Support: Chromium and Firefox (119+) understand
+# `credentialless`; Safari does not (as of writing). Acceptable — the fast
+# path already requires WebGPU anyway. Browsers that
+# don't understand `credentialless` simply don't isolate — no SharedArrayBuffer,
+# ORT WASM stays single-threaded, same graceful behaviour as before this
+# change (SD-3) — they must NOT be broken by these headers, only left
+# un-isolated. See `src/worker/model/ortWasmPaths.ts`'s `resolveOrtNumThreads`
+# for the thread-count decision this isolation unlocks.
 /*
   Content-Security-Policy: default-src 'self'; connect-src 'self' https://huggingface.co https://*.hf.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co https://cdn-lfs-eu-1.huggingface.co; script-src 'self' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
   Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
   Permissions-Policy: camera=(), geolocation=(), microphone=(self)
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless

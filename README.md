@@ -222,8 +222,13 @@ quietly diverge from the real thing.
 
 localRec is a static PWA. Cloudflare Pages is a deliberate choice over GitHub Pages: Pages
 serves **real** security headers via [`public/_headers`](public/_headers) (CSP, HSTS,
-Permissions-Policy), which GitHub Pages cannot. COOP/COEP are deliberately **not** set —
-WebGPU doesn't need them, and `require-corp` would break the model download.
+Permissions-Policy), which GitHub Pages cannot. `Cross-Origin-Opener-Policy: same-origin` +
+`Cross-Origin-Embedder-Policy: credentialless` are also set (KTD4): `credentialless`, unlike
+`require-corp`, needs no `Cross-Origin-Resource-Policy` header from the Hugging Face model
+download's redirect chain, so cross-origin isolation (and the `SharedArrayBuffer` it unlocks
+for the diarization worker's multithreaded WASM) doesn't put that download at risk.
+Supported by Chromium and Firefox 119+; Safari simply stays un-isolated (single-threaded
+speaker annotation, everything else unchanged).
 
 | Setting                | Value                              |
 | ---------------------- | ---------------------------------- |

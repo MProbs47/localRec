@@ -28,10 +28,42 @@ app down with it. Concretely: any diarization/speaker-detection failure (model
 absent, download error, inference error) resolves to the plain transcript with no
 speaker labels, instead of surfacing as an app-level error.
 
-**KTD4** (no COOP/COEP): The app deliberately ships without
-`Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy`. WebGPU doesn't need
-them, and `require-corp` would break the one-time model download from Hugging
-Face. Consequence: no `SharedArrayBuffer`/`Atomics` anywhere in the codebase.
+**KTD4** (COOP + COEP `credentialless`, not `require-corp`): The app ships
+`Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: credentialless`. The original decision here was
+to ship neither header at all — WebGPU doesn't need cross-origin isolation,
+and `require-corp` was judged too risky for the one-time model download from
+Hugging Face: it makes cross-origin responses conditional on CORS/CORP header
+discipline across the HF/Xet redirect chain, which we don't control. (Strictly:
+CORP gating applies to no-cors subresources, and the model downloads are CORS
+fetches — `require-corp` would *probably* have worked. The point is that
+"probably" had the app's most critical operation depending on a third party's
+headers.) That held until a real-hardware measurement
+showed its cost: without isolation there is no `SharedArrayBuffer`, so the
+diarization worker's ONNX Runtime WASM binary can only ever run single-threaded
+— a 58-minute recording took ~30 min to transcribe (WebGPU) but 58+ min just to
+annotate speakers (WASM-only pyannote + WeSpeaker), at ~13 % CPU on a 14-core
+machine. `credentialless` resolves the conflict: it isolates the browsing
+context (SharedArrayBuffer becomes available) without requiring any CORP
+header from cross-origin responses, so the HF download is unaffected.
+`require-corp` remains rejected: it would buy nothing over `credentialless`
+here and reintroduce the third-party-header dependency. Browser support:
+Chromium and Firefox (since 119) understand `credentialless`; Safari does not
+(as of writing — the Firefox claim is owner-verifiable in one console check,
+see the dev-test checklist). Either way the failure mode is benign: browsers
+without `credentialless` support simply get no isolation and keep today's
+single-threaded WASM behaviour (SD-3 — the download-fallback path must not
+break, only stay un-isolated), and the transcription hot path (WebGPU) never
+needed isolation to begin with. Consequence: `SharedArrayBuffer`/`Atomics` are
+now available when isolated, and `src/worker/model/ortWasmPaths.ts`'s
+`resolveOrtNumThreads` uses that to size the WASM thread pool
+(`ort.env.wasm.numThreads`) for the diarization worker only — the
+transcription worker stays WebGPU-only and is explicitly pinned to one thread,
+because ort's own default for an unset `numThreads` would otherwise have
+jumped from 1 to `min(4, ceil(cores/2))` the moment isolation arrived (see the
+comment at its `pinOrtWasmToLocalAssets` call site). Still owed: a real-hardware confirmation
+of the first-run model download under `credentialless` and of actual thread
+scaling on target hardware (both headless-unverifiable).
 
 **KTD5** (model never precached): The ~1.5 GB Whisper model is never part of the
 PWA's build-time precache (the service worker's Workbox manifest). It's fetched

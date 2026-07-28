@@ -50,7 +50,7 @@ import { WeSpeakerEmbedder, WESPEAKER_MODEL_ID, type OrtSessionLike, type OrtTen
 import { diarize, type DiarizeOptions } from './diarize';
 import type { SpeakerTimeline } from './types';
 import { buildHfResolveUrl } from '../storage/modelCache';
-import { pinOrtWasmToLocalAssets } from '../worker/model/ortWasmPaths';
+import { pinOrtWasmToLocalAssets, resolveOrtNumThreads } from '../worker/model/ortWasmPaths';
 
 // S1 privacy fix (see `ortWasmPaths.ts`'s header). Because the import above
 // uses transformers.js' own specifier, `ort.env.wasm` here IS the object its
@@ -59,6 +59,37 @@ import { pinOrtWasmToLocalAssets } from '../worker/model/ortWasmPaths';
 // via transformers.js). Pinning it once here therefore covers both; the value
 // is read lazily on first session creation, so import order doesn't matter.
 pinOrtWasmToLocalAssets(ort.env.wasm);
+
+// KTD4 (revised): this worker is the whole reason the thread count matters —
+// pyannote segmentation + WeSpeaker embeddings are both WASM-only (no WebGPU
+// path, see this file's header, milestone 3), so however many threads
+// `numThreads` allows is however many cores actually do this work. Same
+// shared `ort.env.wasm` singleton as the pin above, so setting it once here
+// covers both models too. Like `wasmPaths` above, it is read when the wasm
+// backend first initialises (i.e. on the first session creation, whichever
+// model gets there first) — module load is simply the one place guaranteed to
+// be earlier than that, so it goes here rather than inside `engine.load()`.
+// `self.crossOriginIsolated` reflects whatever
+// `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy` the page was
+// actually served with (see `public/_headers`) — true isolation, not a guess.
+//
+// CSP check (confirmed against the installed
+// `onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.mjs`, not just assumed):
+// with `numThreads` > 1, ORT spawns its pthread pool via
+// `new Worker(new URL(import.meta.url), {type:"module", …})` — so the pool's
+// origin is wherever the glue module itself was imported from, and BOTH
+// possibilities are already allowed by `worker-src 'self' blob:`
+// (`src/trust/csp.ts`):
+//  - `blob:` — the normal case here. transformers.js' `ensureWasmLoaded`
+//    (`backends/utils/cacheWasm.js`) fetches the pinned `.mjs`, caches it and
+//    rewrites `wasmPaths.mjs` to a `Blob` URL before its own first session,
+//    and `loadSegmentation` (transformers.js) runs before `loadEmbedder`
+//    (raw ort) — see `csp.ts`'s `script-src` comment on the same glue.
+//  - `'self'` — if ort ever initialises before that rewrite, it imports the
+//    pinned same-origin `/assets/ort-wasm-…​.mjs` directly instead.
+// So no CSP change is needed for threads to work, only the isolation that
+// unlocks `SharedArrayBuffer`.
+ort.env.wasm.numThreads = resolveOrtNumThreads(self.crossOriginIsolated, navigator.hardwareConcurrency);
 
 /** WeSpeaker ONNX file on the onnx-community mirror. */
 const WESPEAKER_ONNX_PATH = 'onnx/model.onnx';

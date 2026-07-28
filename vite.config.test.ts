@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   CLOUDFLARE_PAGES_MAX_FILE_BYTES,
@@ -10,6 +13,27 @@ import {
 import viteConfig from './vite.config';
 import { CSP_HEADER_STRING } from './src/trust/csp';
 import { KEPT_CACHE_NAMES } from './src/storage/appShellCache';
+
+const repoRoot = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Parses the single `/*` block of `public/_headers` into a flat
+ * `{ headerName: value }` map. Deliberately dumb (one path, one block) —
+ * this repo's `_headers` file has exactly one route — mirrors
+ * `csp.test.ts`'s `extractHeaderCspFromHeadersFile` in spirit: read the real
+ * static file so a hand-edit that forgets to update it fails a test instead
+ * of silently drifting from the `DEV_PARITY_HEADERS`/`PREVIEW_HEADERS`
+ * constants this suite locks down above.
+ */
+function readHeadersFile(): Record<string, string> {
+  const text = readFileSync(resolve(repoRoot, 'public/_headers'), 'utf-8');
+  const map: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const match = line.match(/^\s{2}([A-Za-z-]+):\s*(.+)$/);
+    if (match) map[match[1]] = match[2].trim();
+  }
+  return map;
+}
 
 // U1 test scenario 1: the build must not be able to precache the ~1.5 GB
 // Whisper model (KTD5). We assert on the *config shape* rather than running
@@ -137,7 +161,7 @@ describe('dev/preview header parity (vite.config.ts)', () => {
     expect(PREVIEW_HEADERS['Content-Security-Policy']).toBe(CSP_HEADER_STRING);
   });
 
-  it('preview keeps the three parity headers alongside it', () => {
+  it('preview keeps the parity headers alongside it', () => {
     expect(PREVIEW_HEADERS).toMatchObject(DEV_PARITY_HEADERS);
   });
 
@@ -149,12 +173,38 @@ describe('dev/preview header parity (vite.config.ts)', () => {
     expect(viteConfig.server?.headers).toBe(DEV_PARITY_HEADERS);
   });
 
-  it('carries exactly the three parity headers, matching public/_headers', () => {
+  it('carries exactly the parity headers, matching public/_headers', () => {
     expect(DEV_PARITY_HEADERS).toEqual({
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
       'Permissions-Policy': 'camera=(), geolocation=(), microphone=(self)',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
     });
+  });
+
+  // KTD4 (revised): COOP/COEP now ship on purpose (credentialless unlocks
+  // SharedArrayBuffer for the diarization worker's WASM thread pool, see
+  // ortWasmPaths.ts's resolveOrtNumThreads) — but `credentialless`, not
+  // `require-corp`, precisely because `require-corp` would force the HF
+  // model download's cross-origin redirect chain to carry a CORP header it
+  // does not send. Locking the exact policy values here is what would catch
+  // a future edit sliding back to `require-corp`.
+  it('uses credentialless COEP, not require-corp — require-corp would break the HF model download', () => {
+    expect(DEV_PARITY_HEADERS['Cross-Origin-Embedder-Policy']).toBe('credentialless');
+    expect(DEV_PARITY_HEADERS['Cross-Origin-Opener-Policy']).toBe('same-origin');
+  });
+
+  // Drift test (same discipline as csp.test.ts's CSP drift check): the
+  // constants above are hand-kept in sync with the real, static
+  // public/_headers file — nothing imports one into the other. This is the
+  // guardrail that catches the moment a header is added/changed in one place
+  // and not the other, for every header this suite locks down, not just CSP.
+  it('DEV_PARITY_HEADERS matches what public/_headers actually ships for every non-CSP header', () => {
+    const shipped = readHeadersFile();
+    for (const [name, value] of Object.entries(DEV_PARITY_HEADERS)) {
+      expect(shipped[name]).toBe(value);
+    }
   });
 });
 

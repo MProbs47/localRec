@@ -62,6 +62,32 @@ import { pinOrtWasmToLocalAssets } from './model/ortWasmPaths';
 // that typing artifact, not a runtime possibility.
 pinOrtWasmToLocalAssets(env.backends.onnx.wasm!);
 
+// Deliberately pinned to ONE thread, unlike `diarization.worker.ts`
+// (KTD4 revised, see that file): `WhisperEngine` always creates its pipeline
+// with `device: 'webgpu'` (whisperEngine.ts) — the ONNX Runtime WASM binary
+// pinned above is the JSEP/asyncify *shell* WebGPU execution runs inside
+// (KTD10), not a CPU compute backend this worker dispatches ops to. The
+// thread-count knob governs a CPU thread pool for WASM-executed ops; there is
+// none of substance on this engine's hot path, which is why the existing
+// ~30 min RTF for a 58 min recording was already acceptable before this
+// change, unlike the diarization worker's WASM-only pyannote/WeSpeaker path.
+//
+// Why an explicit `1` and not simply "no line here": ort does NOT leave an
+// unset `numThreads` alone. Its own flag normalisation (confirmed in the
+// installed `onnxruntime-web/dist/ort.webgpu.bundle.min.mjs` — the entry
+// transformers.js imports) reads
+//
+//   if (numThreads is not a positive integer)
+//     numThreads = self.crossOriginIsolated ? min(4, ceil(hardwareConcurrency/2)) : 1;
+//
+// and `env.wasm` ships as `{}`, i.e. unset. So the moment KTD4's COOP/COEP
+// make this worker cross-origin isolated, "no line here" would have silently
+// become FOUR threads (a 7-thread pool on the owner's 14-core machine once
+// diarization runs too) on the app's core, WebGPU-driven path — an unmeasured
+// change nobody asked for. Pinning 1 keeps this worker exactly as it behaved
+// before KTD4 was revised; raising it is a separate, measured decision.
+env.backends.onnx.wasm!.numThreads = 1;
+
 /**
  * The one message shape this worker posts to the main thread: a finalized
  * transcript block with its global `[startMs, endMs)` range. There is no
@@ -169,7 +195,7 @@ const api: WorkerApi = {
    * report a best-effort 0-then-1, not real mid-call fractions.
    */
   async transcribeFile(pcm, onProgress, language) {
-    return engine.transcribe(pcm, { language: language ?? 'de', task: 'transcribe', onProgress });
+    return await engine.transcribe(pcm, { language: language ?? 'de', task: 'transcribe', onProgress });
   },
 };
 

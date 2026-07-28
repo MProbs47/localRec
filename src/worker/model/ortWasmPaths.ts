@@ -18,6 +18,12 @@
  * onnx.js excerpt above), which is what this Chromium-only app actually
  * loads; the current `dist/assets` output confirms
  * `ort-wasm-simd-threaded.asyncify-*.wasm` is the file that ships.
+ *
+ * This module also owns `resolveOrtNumThreads` (below `pinOrtWasmToLocalAssets`):
+ * a second, unrelated-at-first-glance but same-binary decision — how many
+ * threads that pinned WASM binary is allowed to use. Kept in the same file
+ * because both are "how this one ORT WASM asset gets configured before its
+ * first session", not because they share logic.
  */
 // Note: `onnxruntime-web`'s `package.json` "exports" map only publishes these
 // two files at top-level subpaths (no `dist/` prefix) — confirmed against the
@@ -53,4 +59,48 @@ export interface OrtWasmEnvLike {
  */
 export function pinOrtWasmToLocalAssets(wasmEnv: OrtWasmEnvLike): void {
   wasmEnv.wasmPaths = { mjs: ortMjsUrl, wasm: ortWasmUrl };
+}
+
+/**
+ * KTD4 (revised): `COEP: credentialless` (see `public/_headers`) makes
+ * `SharedArrayBuffer` available whenever the page is cross-origin isolated,
+ * which is what lets the shipped `ort-wasm-simd-threaded.asyncify` binary run
+ * its WASM ops across more than one thread. Without isolation (older
+ * Chromium, or a Safari visitor on the download-fallback path — Safari has
+ * no `credentialless` as of writing; Firefox ships it since 119), there is no
+ * `SharedArrayBuffer` and ORT silently pins itself to one thread regardless
+ * of what `numThreads` says — so the `false` branch below is not a guess,
+ * it is today's already-shipped, already-measured behaviour (see
+ * `public/_headers`' header comment for the 58-minute-diarization measurement
+ * this fixes).
+ *
+ * The isolated branch is deliberately conservative, not "use every core":
+ *
+ *  - `hardwareConcurrency - 2`: leave headroom for the UI thread (React
+ *    rendering, the live VU meter) and the browser/OS's own housekeeping —
+ *    pyannote/WeSpeaker inference runs post-hoc (KTD15), after recording has
+ *    stopped, but the user is still expected to keep using the tab/machine
+ *    while it grinds.
+ *  - capped at 8: heterogeneous consumer CPUs (performance + efficiency
+ *    cores) do not scale ORT's WASM thread pool linearly past a handful of
+ *    threads — efficiency cores add diminishing, sometimes negative, returns
+ *    once the pool contends for shared cache/memory bandwidth. 8 is a
+ *    reasonable ceiling pending the real hardware measurement this still
+ *    owes (HARDWARE-MILESTONE, see below).
+ *  - floored at 1: `hardwareConcurrency` can itself be small (or, per spec,
+ *    absent) — never return zero or negative threads.
+ *
+ * HARDWARE-MILESTONE (headless-unverifiable, validate on target hardware):
+ * the exact formula (`- 2`, cap `8`) is a reasoned starting point, not a
+ * calibrated one — confirm actual wall-clock diarization speedup on the
+ * owner's 14-core machine and revisit the constants here if it under- or
+ * over-subscribes.
+ */
+export function resolveOrtNumThreads(
+  crossOriginIsolated: boolean,
+  hardwareConcurrency: number | undefined,
+): number {
+  if (!crossOriginIsolated) return 1;
+  if (!hardwareConcurrency || hardwareConcurrency < 1) return 1;
+  return Math.min(8, Math.max(1, hardwareConcurrency - 2));
 }
