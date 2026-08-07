@@ -60,6 +60,21 @@ export interface ContainerInfo {
   objectTypeIndication?: number;
   /** MPEG-4 audio object type from the same `esds` — 2 = AAC-LC, 5 = HE-AAC, 29 = HE-AACv2, 42 = xHE-AAC/USAC. Chromium decodes 2/5/29 and not 42. */
   audioObjectType?: number;
+  /**
+   * Media duration in seconds from `mvhd` (`duration / timescale`) — mp4 family
+   * only. **The single most load-bearing number in this report.** A whole-file
+   * `decodeAudioData` costs memory proportional to the DURATION, and a
+   * recording's file size says nothing about it: a screen-share-heavy meeting
+   * varies tenfold in bitrate, so 95 MB is fifteen minutes or three hours. A
+   * report without this number cannot tell "codec unsupported" from "far too
+   * long to fit in memory", which is exactly the confusion that cost one
+   * support case several rounds.
+   */
+  durationSeconds?: number;
+  /** Channel count from the audio sample entry — a multiplier on the decode cost, since `decodeAudioData` keeps the source channels. */
+  audioChannels?: number;
+  /** Sample rate from the audio sample entry. Informational: the decoded buffer comes back at the decoding context's rate, not this one. */
+  audioSampleRate?: number;
   /** Anything that went wrong or looked odd while parsing — a truncated/misdeclared box is itself a finding, so it is reported rather than swallowed. */
   notes: string[];
 }
@@ -135,6 +150,58 @@ function findEsds(view: DataView, start: number, end: number, info: ContainerInf
   }
 }
 
+/**
+ * `mvhd`: version/flags (4), then creation/modification times, `timescale` and
+ * `duration`. Version 1 widens both times AND the duration to 64 bits, shifting
+ * every following field — get that wrong and the duration is garbage rather
+ * than absent, which is worse than not reading it at all.
+ */
+function parseMvhd(view: DataView, start: number, end: number, info: ContainerInfo): void {
+  if (start + 4 > end) return;
+  const version = view.getUint8(start);
+  const timescaleOffset = version === 1 ? start + 20 : start + 12;
+  const durationOffset = version === 1 ? start + 24 : start + 16;
+  if ((version === 1 ? durationOffset + 8 : durationOffset + 4) > end) return;
+
+  const timescale = view.getUint32(timescaleOffset);
+  const duration =
+    version === 1
+      ? view.getUint32(durationOffset) * 2 ** 32 + view.getUint32(durationOffset + 4)
+      : view.getUint32(durationOffset);
+
+  // All-ones is the "duration unknown" sentinel a fragmented or
+  // still-being-written mp4 leaves here. Taken literally it reads as ~49 days
+  // and would trip any length guard downstream — an absent duration is honest,
+  // a fabricated one is not.
+  const unknown = version === 1 ? duration >= 2 ** 64 - 1 : duration === 0xffffffff;
+  if (timescale > 0 && duration > 0 && !unknown) info.durationSeconds = duration / timescale;
+}
+
+/**
+ * Channel count and sample rate out of an AudioSampleEntry's fixed fields:
+ * reserved(6) dref(2) reserved(8) **channelcount(2)** samplesize(2)
+ * pre_defined(2) reserved(2) **samplerate(4, 16.16 fixed)**.
+ *
+ * A VisualSampleEntry keeps `width`/`height` in overlapping territory, so a
+ * plausibility window does the discriminating rather than a fourcc allow-list:
+ * a video entry reads back 0 channels (its `pre_defined` zeros land on the
+ * channelcount field) and is rejected, while 1920 would never pass anyway. That
+ * keeps this working for audio codecs nobody thought to list.
+ */
+function parseAudioSampleEntry(view: DataView, payloadStart: number, end: number, info: ContainerInfo): void {
+  if (payloadStart + 28 > end) return;
+  const channels = view.getUint16(payloadStart + 16);
+  const sampleRate = view.getUint16(payloadStart + 24); // integer part of the 16.16 fixed-point value
+  if (channels < 1 || channels > 32) return;
+  if (sampleRate < 3000 || sampleRate > 384000) return;
+  // First plausible audio track wins — a second one would not change the
+  // decode cost estimate, since `decodeAudioData` only ever decodes the first.
+  if (info.audioChannels === undefined) {
+    info.audioChannels = channels;
+    info.audioSampleRate = sampleRate;
+  }
+}
+
 /** `stsd` payload: version/flags (4) + entry_count (4), then one length-prefixed sample entry per track format. */
 function parseStsd(view: DataView, start: number, end: number, info: ContainerInfo): void {
   if (start + 8 > end) return;
@@ -148,7 +215,9 @@ function parseStsd(view: DataView, start: number, end: number, info: ContainerIn
       info.notes.push(`stsd entry ${i} declares ${entrySize} bytes (invalid)`);
       return;
     }
-    if (format === 'mp4a') findEsds(view, offset + 8, Math.min(offset + entrySize, end), info);
+    const entryEnd = Math.min(offset + entrySize, end);
+    parseAudioSampleEntry(view, offset + 8, entryEnd, info);
+    if (format === 'mp4a') findEsds(view, offset + 8, entryEnd, info);
     offset += entrySize;
   }
 }
@@ -179,6 +248,7 @@ function walkMp4Boxes(view: DataView, start: number, end: number, depth: number,
       return;
     }
     if (type === 'stsd') parseStsd(view, offset + headerSize, offset + size, info);
+    else if (type === 'mvhd') parseMvhd(view, offset + headerSize, offset + size, info);
     else if (MP4_CONTAINER_BOXES.has(type) && depth < 8) {
       walkMp4Boxes(view, offset + headerSize, offset + size, depth + 1, info);
     }
@@ -268,7 +338,51 @@ export function describeThrown(error: unknown): string {
 }
 
 function formatBytes(size: number): string {
+  if (size >= 1024 ** 3) return `${(size / 1024 ** 3).toFixed(2)} GB`;
   return size >= 1024 * 1024 ? `${(size / (1024 * 1024)).toFixed(1)} MB` : `${size} bytes`;
+}
+
+/** `h:mm:ss` — the shape a player shows, so the number in the report can be compared against what the user sees without arithmetic. */
+export function formatDuration(seconds: number): string {
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return `${hours}:${String(minutes).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** Every live allocation of a whole-file decode, in bytes. See `estimateDecodeBytes`. */
+export interface DecodeSizeEstimate {
+  /** The `AudioBuffer` `decodeAudioData` returns: one Float32 per sample per channel, at the DECODING CONTEXT's rate — not the file's. */
+  decodedBytes: number;
+  /** `downmixToMono`'s output, a second full-length Float32 array. */
+  monoBytes: number;
+  /** Both of the above, alive at the same moment. This is the number that has to fit. */
+  peakBytes: number;
+}
+
+/**
+ * What a whole-file `decodeAudioData` will cost in memory.
+ *
+ * Exactly two allocations are alive together and both are counted: the decoded
+ * `AudioBuffer` (channels × rate × duration × 4) and the mono downmix copy
+ * (rate × duration × 4). The resample step adds nothing when the decoding
+ * context already runs at the target rate — `resampleLinear` returns its input
+ * unchanged for equal rates.
+ *
+ * `targetSampleRate` is the DECODING CONTEXT's rate, because that is what
+ * `decodeAudioData` resamples to. This is why decoding through a 16 kHz
+ * `OfflineAudioContext` rather than a 48 kHz hardware `AudioContext` cuts the
+ * cost threefold: the same file, a third of the peak.
+ */
+export function estimateDecodeBytes(
+  durationSeconds: number,
+  channels: number,
+  targetSampleRate: number,
+): DecodeSizeEstimate {
+  const frames = durationSeconds * targetSampleRate;
+  const decodedBytes = frames * channels * 4;
+  const monoBytes = frames * 4;
+  return { decodedBytes, monoBytes, peakBytes: decodedBytes + monoBytes };
 }
 
 /** Human names for the `esds` object types worth calling out by name — the ones that explain a rejected decode. */
@@ -279,11 +393,24 @@ const AUDIO_OBJECT_TYPE_NAMES: Record<number, string> = {
   42: 'xHE-AAC/USAC (not decodable by Chromium)',
 };
 
+/** Assumed channel count when the container didn't reveal one — the pessimistic guess, because stereo costs twice mono and an under-estimate is the harmful direction. */
+const ASSUMED_CHANNELS = 2;
+
+/**
+ * Decode rate used for the cost estimate when the caller doesn't state one.
+ * Mirrors `audioDecode.ts`'s `TARGET_SAMPLE_RATE` by value rather than by
+ * import: that module imports THIS one, and a cycle for one constant is a
+ * worse trade than a documented duplicate.
+ */
+const FALLBACK_DECODE_RATE = 16000;
+
 export interface DiagnosticsInput {
   /** The `AudioDecodeErrorCode` of the failure being explained. */
   code: string;
   /** Whatever the failing step threw. */
   cause: unknown;
+  /** The rate the decoding context actually runs at — what `decodeAudioData` resamples to, and therefore what the cost estimate must use. */
+  decodeSampleRate?: number;
   fileName?: string;
   fileSize?: number;
   /** `File.type` as the OS reported it — kept alongside the sniffed container precisely so a disagreement between them is visible. */
@@ -314,6 +441,9 @@ export function formatDiagnosticsReport(input: DiagnosticsInput): string {
     const parts = [container.container];
     if (container.brand) parts.push(`brand ${container.brand.trim()}`);
     if (container.sampleFormats?.length) parts.push(`tracks ${container.sampleFormats.join(',')}`);
+    if (container.audioChannels !== undefined) {
+      parts.push(`${container.audioChannels} ch @ ${container.audioSampleRate} Hz`);
+    }
     if (container.objectTypeIndication !== undefined) {
       parts.push(`oti 0x${container.objectTypeIndication.toString(16)}`);
     }
@@ -322,6 +452,22 @@ export function formatDiagnosticsReport(input: DiagnosticsInput): string {
       parts.push(`aot ${container.audioObjectType}${name ? ` (${name})` : ''}`);
     }
     lines.push(`container: ${parts.join(' | ')}`);
+
+    // The duration line, and immediately beside it what that duration costs.
+    // Separated from `container:` because it is the line a reader should look
+    // at first, and because the cost is derived rather than read from the file.
+    if (container.durationSeconds !== undefined) {
+      const rate = input.decodeSampleRate ?? FALLBACK_DECODE_RATE;
+      const channels = container.audioChannels ?? ASSUMED_CHANNELS;
+      const estimate = estimateDecodeBytes(container.durationSeconds, channels, rate);
+      lines.push(
+        `duration: ${formatDuration(container.durationSeconds)} | decode needs ~${formatBytes(estimate.peakBytes)}` +
+          ` peak at ${rate} Hz × ${channels} ch`,
+      );
+    } else {
+      lines.push('duration: unknown — decode cost could not be estimated');
+    }
+
     for (const note of container.notes) lines.push(`note: ${note}`);
   }
 
@@ -376,26 +522,32 @@ async function describeAudioContext(env: DiagnosticsEnvLike): Promise<string> {
 
 /**
  * The production diagnostics collector wired into `App.tsx`'s decode seam.
- * Re-reads the blob rather than reusing the `ArrayBuffer` the decode
- * attempt held: Chromium's `decodeAudioData` takes ownership of (and
- * detaches) the buffer it is handed, so those bytes are gone by the time
- * this runs. A `File` is backed by the file on disk, so a second read is
- * cheap enough for a path that only executes once, on failure.
+ *
+ * **Prefers the container the caller already sniffed.** `audioDecode.ts` now
+ * walks the boxes before decoding (it needs the duration for its length
+ * guard), so passing that result in avoids re-reading the whole file — 95 MB
+ * in the case that motivated this. When no container is supplied the blob is
+ * re-read instead: reusing the `ArrayBuffer` the decode attempt held is not an
+ * option, because Chromium's `decodeAudioData` takes ownership of and detaches
+ * that buffer, leaving it empty by the time this runs.
  */
 export async function collectAudioDecodeDiagnostics(
   blob: Blob,
-  failure: { code: string; cause: unknown },
+  failure: { code: string; cause: unknown; container?: ContainerInfo; decodeSampleRate?: number },
 ): Promise<string> {
   const env = globalThis as unknown as DiagnosticsEnvLike;
-  let container: ContainerInfo | undefined;
-  try {
-    container = sniffContainer(new Uint8Array(await blob.arrayBuffer()));
-  } catch (error) {
-    container = { container: 'unreadable', notes: [`re-reading the file failed: ${describeThrown(error)}`] };
+  let container = failure.container;
+  if (!container) {
+    try {
+      container = sniffContainer(new Uint8Array(await blob.arrayBuffer()));
+    } catch (error) {
+      container = { container: 'unreadable', notes: [`re-reading the file failed: ${describeThrown(error)}`] };
+    }
   }
   return formatDiagnosticsReport({
     code: failure.code,
     cause: failure.cause,
+    decodeSampleRate: failure.decodeSampleRate,
     fileName: (blob as Blob & { name?: string }).name,
     fileSize: blob.size,
     fileType: blob.type,

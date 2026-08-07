@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   describeThrown,
+  estimateDecodeBytes,
   formatDiagnosticsReport,
   probeCodecSupport,
   sniffContainer,
@@ -68,10 +69,48 @@ function audioSpecificConfig(audioObjectType: number): number[] {
   return [(31 << 3) | (escaped >>> 3), ((escaped & 0x07) << 5) | 0x02, 0x10];
 }
 
-/** A minimal AudioSampleEntry of the given format, with optional child boxes (an `esds` for `mp4a`). */
-function sampleEntry(format: string, children: number[] = []): number[] {
-  const fixedFields = new Array(28).fill(0); // reserved/channelcount/samplesize/samplerate — never read
+/**
+ * A minimal AudioSampleEntry of the given format, with optional child boxes
+ * (an `esds` for `mp4a`). The 28 fixed bytes are laid out for real, because
+ * `channelcount` (payload+16) and `samplerate` (payload+24, 16.16 fixed) are
+ * now read: reserved(6) dref(2) reserved(8) channelcount(2) samplesize(2)
+ * pre_defined(2) reserved(2) samplerate(4).
+ */
+function sampleEntry(
+  format: string,
+  children: number[] = [],
+  audio: { channels?: number; sampleRate?: number } = {},
+): number[] {
+  const channels = audio.channels ?? 0;
+  const sampleRate = audio.sampleRate ?? 0;
+  const fixedFields = [
+    0, 0, 0, 0, 0, 0, // reserved
+    0, 1, // data_reference_index
+    0, 0, 0, 0, 0, 0, 0, 0, // reserved
+    (channels >>> 8) & 0xff, channels & 0xff,
+    0, 16, // samplesize
+    0, 0, // pre_defined
+    0, 0, // reserved
+    (sampleRate >>> 8) & 0xff, sampleRate & 0xff, 0, 0, // samplerate as 16.16
+  ];
   return box(format, [...fixedFields, ...children]);
+}
+
+/**
+ * A VisualSampleEntry — needed because its `width`/`height` land at exactly
+ * the offsets an AudioSampleEntry keeps `channelcount`/`samplerate` in
+ * (payload+24/+26 vs. +16/+24). The sniffer must not mistake 1920×1080 for a
+ * 1920-channel track, and only a real video entry proves that.
+ */
+function visualSampleEntry(format: string, width: number, height: number): number[] {
+  return box(format, [
+    0, 0, 0, 0, 0, 0, // reserved
+    0, 1, // data_reference_index
+    0, 0, 0, 0, // pre_defined + reserved
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // pre_defined[3]
+    (width >>> 8) & 0xff, width & 0xff,
+    (height >>> 8) & 0xff, height & 0xff,
+  ]);
 }
 
 function stsd(entries: number[][]): number[] {
@@ -83,10 +122,29 @@ function trak(entries: number[][]): number[] {
   return box('trak', box('mdia', box('minf', box('stbl', stsd(entries)))));
 }
 
-function buildMp4(brand: string, traks: number[][], options: { moovLast?: boolean; mdat?: number[] } = {}): Uint8Array {
+/** `mvhd`, the box that carries the media duration — version 0 (32-bit times) or version 1 (64-bit). */
+function mvhd(timescale: number, duration: number, version: 0 | 1 = 0): number[] {
+  if (version === 0) {
+    return box('mvhd', [0x00, 0x00, 0x00, 0x00, ...u32(0), ...u32(0), ...u32(timescale), ...u32(duration)]);
+  }
+  const high = Math.floor(duration / 2 ** 32);
+  return box('mvhd', [
+    0x01, 0x00, 0x00, 0x00,
+    ...u32(0), ...u32(0), // creation_time (64-bit)
+    ...u32(0), ...u32(0), // modification_time (64-bit)
+    ...u32(timescale),
+    ...u32(high), ...u32(duration - high * 2 ** 32),
+  ]);
+}
+
+function buildMp4(
+  brand: string,
+  traks: number[][],
+  options: { moovLast?: boolean; mdat?: number[]; moovExtras?: number[] } = {},
+): Uint8Array {
   const ftyp = box('ftyp', [...ascii(brand), ...u32(512), ...ascii('isomiso2')]);
   const mdat = options.mdat ?? box('mdat', new Array(64).fill(0x11));
-  const moov = box('moov', traks.flat());
+  const moov = box('moov', [...(options.moovExtras ?? []), ...traks.flat()]);
   return new Uint8Array(options.moovLast ? [...ftyp, ...mdat, ...moov] : [...ftyp, ...moov, ...mdat]);
 }
 
@@ -171,6 +229,107 @@ describe('sniffContainer: mp4 family', () => {
 
     expect(info.sampleFormats).toEqual([]);
     expect(info.notes.join(' ')).toMatch(/no stsd sample entry/);
+  });
+});
+
+/**
+ * The support case this whole module exists for turned on ONE number the
+ * report didn't carry: the duration. 95.2 MB said nothing — a Teams recording's
+ * bitrate varies tenfold, so the same file size is 15 minutes or three hours,
+ * and only the duration says whether a whole-file decode can fit in memory at
+ * all. It sits in `mvhd`, a box the walk already passes.
+ */
+describe('sniffContainer: duration from mvhd', () => {
+  it('reads a version-0 duration as seconds (duration / timescale)', () => {
+    // 2:40:11 at a 1000-tick timescale — the real interview from the report.
+    const bytes = buildMp4('isom', [trak([sampleEntry('mp4a')])], { moovExtras: mvhd(1000, 9_611_000) });
+
+    expect(sniffContainer(bytes).durationSeconds).toBeCloseTo(9611, 3);
+  });
+
+  it('reads a version-1 (64-bit) duration, where the fields shift by eight bytes', () => {
+    const bytes = buildMp4('isom', [trak([sampleEntry('mp4a')])], { moovExtras: mvhd(48000, 48000 * 3600, 1) });
+
+    expect(sniffContainer(bytes).durationSeconds).toBeCloseTo(3600, 3);
+  });
+
+  it('ignores the "unknown duration" sentinel instead of reporting 49 days', () => {
+    // 0xffffffff is what a fragmented/still-being-written mp4 puts here. Taken
+    // literally it would produce a nonsense estimate and a false rejection.
+    const bytes = buildMp4('isom', [trak([sampleEntry('mp4a')])], { moovExtras: mvhd(1000, 0xffffffff) });
+
+    expect(sniffContainer(bytes).durationSeconds).toBeUndefined();
+  });
+
+  it('leaves the duration absent when there is no mvhd at all', () => {
+    expect(sniffContainer(buildMp4('isom', [trak([sampleEntry('mp4a')])])).durationSeconds).toBeUndefined();
+  });
+
+  it('never divides by a zero timescale', () => {
+    const bytes = buildMp4('isom', [trak([sampleEntry('mp4a')])], { moovExtras: mvhd(0, 1000) });
+
+    expect(sniffContainer(bytes).durationSeconds).toBeUndefined();
+  });
+});
+
+describe('sniffContainer: audio channel count and sample rate', () => {
+  it('reads the channel count and sample rate from the audio sample entry', () => {
+    const bytes = buildMp4('M4A ', [
+      trak([sampleEntry('mp4a', esds(0x40, audioSpecificConfig(2)), { channels: 2, sampleRate: 44100 })]),
+    ]);
+
+    const info = sniffContainer(bytes);
+
+    expect(info.audioChannels).toBe(2);
+    expect(info.audioSampleRate).toBe(44100);
+  });
+
+  it('does not mistake a video entry’s width for a channel count', () => {
+    // avc1 keeps width/height where an audio entry keeps channelcount/samplerate.
+    // A 1920-channel track would blow the decode estimate out by three orders.
+    const bytes = buildMp4('isom', [
+      trak([visualSampleEntry('avc1', 1920, 1080)]),
+      trak([sampleEntry('mp4a', esds(0x40, audioSpecificConfig(2)), { channels: 1, sampleRate: 16000 })]),
+    ]);
+
+    const info = sniffContainer(bytes);
+
+    expect(info.sampleFormats).toEqual(['avc1', 'mp4a']);
+    expect(info.audioChannels).toBe(1);
+    expect(info.audioSampleRate).toBe(16000);
+  });
+
+  it('leaves both absent when the values are implausible rather than reporting them', () => {
+    const bytes = buildMp4('isom', [trak([sampleEntry('mp4a', [], { channels: 0, sampleRate: 0 })])]);
+
+    const info = sniffContainer(bytes);
+
+    expect(info.audioChannels).toBeUndefined();
+    expect(info.audioSampleRate).toBeUndefined();
+  });
+});
+
+describe('estimateDecodeBytes', () => {
+  it('sums the decoded buffer and the mono downmix copy — the two live allocations', () => {
+    // 1 s stereo at 16 kHz Float32: 16000*4*2 decoded + 16000*4 mono.
+    const estimate = estimateDecodeBytes(1, 2, 16000);
+
+    expect(estimate.decodedBytes).toBe(128_000);
+    expect(estimate.monoBytes).toBe(64_000);
+    expect(estimate.peakBytes).toBe(192_000);
+  });
+
+  it('puts the report’s real interview where the numbers said it was', () => {
+    // 2:40:11 stereo. At the OLD 48 kHz context: ~5.5 GB. At 16 kHz: ~1.8 GB.
+    const at48k = estimateDecodeBytes(9611, 2, 48000);
+    const at16k = estimateDecodeBytes(9611, 2, 16000);
+
+    expect(at48k.peakBytes / 1e9).toBeCloseTo(5.54, 1);
+    expect(at16k.peakBytes / 1e9).toBeCloseTo(1.85, 1);
+  });
+
+  it('scales with channel count, since decodeAudioData keeps the source channels', () => {
+    expect(estimateDecodeBytes(100, 1, 16000).peakBytes).toBeLessThan(estimateDecodeBytes(100, 2, 16000).peakBytes);
   });
 });
 
@@ -264,6 +423,9 @@ describe('formatDiagnosticsReport', () => {
     sampleFormats: ['mp4a'],
     objectTypeIndication: 0x40,
     audioObjectType: 42,
+    durationSeconds: 9611,
+    audioChannels: 2,
+    audioSampleRate: 44100,
     notes: ['moov appears after mdat'],
   };
 
@@ -271,12 +433,13 @@ describe('formatDiagnosticsReport', () => {
     const report = formatDiagnosticsReport({
       code: 'AUDIO_DECODE_REJECTED',
       cause: new DOMException('Unable to decode audio data', 'EncodingError'),
+      decodeSampleRate: 16000,
       fileName: 'Besprechung.m4a',
       fileSize: 78 * 1024 * 1024,
       fileType: 'audio/mp4',
       container,
       codecSupport: { 'aac-lc': true, 'ac-3': false },
-      audioContext: '48000 Hz, state suspended',
+      audioContext: '16000 Hz, state suspended',
       userAgent: 'Mozilla/5.0 Edg/141.0.0.0',
     });
 
@@ -285,12 +448,36 @@ describe('formatDiagnosticsReport', () => {
       'code: AUDIO_DECODE_REJECTED',
       'cause: EncodingError: Unable to decode audio data',
       'file: Besprechung.m4a | 78.0 MB | audio/mp4',
-      'container: mp4 | brand M4A | tracks mp4a | oti 0x40 | aot 42 (xHE-AAC/USAC (not decodable by Chromium))',
+      'container: mp4 | brand M4A | tracks mp4a | 2 ch @ 44100 Hz | oti 0x40 | aot 42 (xHE-AAC/USAC (not decodable by Chromium))',
+      'duration: 2:40:11 | decode needs ~1.72 GB peak at 16000 Hz × 2 ch',
       'note: moov appears after mdat',
-      'audio context: 48000 Hz, state suspended',
+      'audio context: 16000 Hz, state suspended',
       'codecs: aac-lc=yes ac-3=no',
       'browser: Mozilla/5.0 Edg/141.0.0.0',
     ]);
+  });
+
+  it('says the duration is unknown rather than silently dropping the cost estimate', () => {
+    const report = formatDiagnosticsReport({
+      code: 'AUDIO_DECODE_REJECTED',
+      cause: null,
+      container: { container: 'mp4', sampleFormats: ['mp4a'], notes: [] },
+    });
+
+    expect(report).toContain('duration: unknown — decode cost could not be estimated');
+  });
+
+  it('assumes stereo for the estimate when the container hid the channel count', () => {
+    // The pessimistic direction on purpose: an under-estimate would wave a file
+    // through that cannot fit.
+    const report = formatDiagnosticsReport({
+      code: 'AUDIO_DECODE_REJECTED',
+      cause: null,
+      decodeSampleRate: 16000,
+      container: { container: 'mp4', sampleFormats: ['mp4a'], durationSeconds: 3600, notes: [] },
+    });
+
+    expect(report).toContain('× 2 ch');
   });
 
   it('still produces a usable report when almost nothing could be collected', () => {

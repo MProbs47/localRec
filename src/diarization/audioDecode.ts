@@ -62,7 +62,13 @@
  * U20 (the unit that owns chunked/paced import decoding), not attempted now.
  */
 import { resampleLinear } from '../audio/resample';
-import { describeThrown } from './audioDiagnostics';
+import {
+  describeThrown,
+  estimateDecodeBytes,
+  formatDuration,
+  sniffContainer,
+  type ContainerInfo,
+} from './audioDiagnostics';
 
 /** 16 kHz mono is the fixed target for every model in this codebase (KTD10) — diarization (U15) and batch-transcription (U20) both consume exactly this shape. */
 export const TARGET_SAMPLE_RATE = 16000;
@@ -79,10 +85,32 @@ export const TARGET_SAMPLE_RATE = 16000;
 export type AudioDecodeErrorCode =
   | 'AUDIO_EMPTY_FILE'
   | 'AUDIO_READ_FAILED'
+  | 'AUDIO_TOO_LONG'
   | 'AUDIO_CONTEXT_UNAVAILABLE'
   | 'AUDIO_CONTEXT_FAILED'
   | 'AUDIO_DECODE_REJECTED'
   | 'AUDIO_DECODE_EMPTY';
+
+/**
+ * The ceiling for a whole-file decode's peak allocation, above which the length
+ * guard refuses before spending minutes on a decode that cannot succeed.
+ *
+ * **This is a starting value, not a measured one — retune it from a real device
+ * run.** There is no honest browser API to derive it from: `performance.memory`
+ * is Chromium-only and reports the JS heap, not the audio allocation, and the
+ * web exposes no device-memory figure at all. So it is a constant, and the
+ * repo's own rule applies — measure, don't guess.
+ *
+ * Deliberately GENEROUS. A false rejection is worse than a late failure,
+ * because it looks authoritative and cannot be argued with, while an actual
+ * allocation failure at least produces a real report. 1.5 GB allows roughly
+ * 2 h 10 of stereo at 16 kHz and refuses the 2 h 40 interview that motivated
+ * the guard (~1.8 GB).
+ *
+ * Obsolete for mp4 the day chunked decoding lands, which has a completely
+ * different ceiling — kept as one constant and one message on purpose.
+ */
+export const MAX_DECODE_PEAK_BYTES = 1_500_000_000;
 
 /**
  * One short English line per code, shown under the localised headline on the
@@ -94,6 +122,7 @@ export type AudioDecodeErrorCode =
 export const AUDIO_DECODE_CODE_DESCRIPTIONS: Record<AudioDecodeErrorCode, string> = {
   AUDIO_EMPTY_FILE: 'The selected file contains no data.',
   AUDIO_READ_FAILED: 'The file could not be read from disk.',
+  AUDIO_TOO_LONG: 'This recording is too long to decode in the browser.',
   AUDIO_CONTEXT_UNAVAILABLE: 'This browser has no Web Audio support.',
   AUDIO_CONTEXT_FAILED: 'The browser could not open an audio context on this device.',
   AUDIO_DECODE_REJECTED: 'The browser cannot decode this file’s audio codec.',
@@ -155,7 +184,14 @@ export type AudioDecoderLike = (arrayBuffer: ArrayBuffer) => Promise<DecodedAudi
  */
 export type AudioDecodeDiagnose = (
   blob: Blob,
-  failure: { code: AudioDecodeErrorCode; cause: unknown },
+  failure: {
+    code: AudioDecodeErrorCode;
+    cause: unknown;
+    /** The container this module already sniffed for its length guard — passed on so the collector need not re-read the whole file. */
+    container?: ContainerInfo;
+    /** The rate the decoding context runs at, so the report's cost estimate matches what actually happened. */
+    decodeSampleRate?: number;
+  },
 ) => Promise<string>;
 
 export interface AudioDecodeDeps {
@@ -192,12 +228,15 @@ function downmixToMono(decoded: DecodedAudioLike): Float32Array {
  * decoder exception or a hang reach the caller.
  */
 export async function decodeAudioBlobTo16kMonoPcm(blob: Blob, deps: AudioDecodeDeps): Promise<Float32Array> {
+  /** Filled in once the bytes are readable, then handed to the diagnostics so a failure report needs no second read of the file. */
+  let container: ContainerInfo | undefined;
+
   /** Builds the diagnostics (best-effort) and throws the coded error. Every failure below goes through here so none can forget the report. */
   const fail = async (code: AudioDecodeErrorCode, message: string, cause?: unknown): Promise<never> => {
     let details: string | undefined;
     if (deps.diagnose) {
       try {
-        details = await deps.diagnose(blob, { code, cause });
+        details = await deps.diagnose(blob, { code, cause, container, decodeSampleRate: TARGET_SAMPLE_RATE });
       } catch {
         // Diagnostics are a nice-to-have; the real failure below is not.
         // Swallowing here is what guarantees this module can only ever throw
@@ -216,6 +255,41 @@ export async function decodeAudioBlobTo16kMonoPcm(blob: Blob, deps: AudioDecodeD
     arrayBuffer = await blob.arrayBuffer();
   } catch (cause) {
     return fail('AUDIO_READ_FAILED', 'failed to read blob bytes', cause);
+  }
+
+  // Walk the container BEFORE decoding, for two reasons. It yields the duration
+  // the length guard below needs, and it must happen while the bytes are still
+  // ours: `decodeAudioData` takes ownership of the `ArrayBuffer` and detaches
+  // it, so nothing can be read from it afterwards. Cheap regardless of file
+  // size — `mdat` is skipped by its declared size, never read.
+  container = sniffContainer(new Uint8Array(arrayBuffer));
+
+  // The length guard. Only fires when the duration is actually known: guessing
+  // a length for a container that doesn't carry one would refuse files that
+  // would have worked, and a false refusal is the worse failure (it looks
+  // authoritative, where a real allocation failure at least yields a report).
+  //
+  // KNOWN LIMITATION: the estimate assumes the decode lands at
+  // `TARGET_SAMPLE_RATE`, which is what `createDecodingContext` arranges. This
+  // function cannot verify it — the context lives inside the injected
+  // `deps.decode`, by design. On a browser with no `OfflineAudioContext` the
+  // fallback decodes at the hardware rate and the estimate is optimistic by
+  // that ratio, so an over-long file slips past the guard and fails for real
+  // instead. Accepted rather than plumbed: `OfflineAudioContext` has been
+  // universal for a decade, the failure mode degrades to the pre-guard
+  // behaviour, and the `console.info` below reports the rate actually used, so
+  // the mismatch is observable rather than invisible.
+  if (container.durationSeconds !== undefined) {
+    const channels = container.audioChannels ?? 2; // pessimistic: stereo costs twice mono
+    const estimate = estimateDecodeBytes(container.durationSeconds, channels, TARGET_SAMPLE_RATE);
+    if (estimate.peakBytes > MAX_DECODE_PEAK_BYTES) {
+      const needs = (estimate.peakBytes / 1024 ** 3).toFixed(2);
+      const ceiling = (MAX_DECODE_PEAK_BYTES / 1024 ** 3).toFixed(2);
+      return fail(
+        'AUDIO_TOO_LONG',
+        `${formatDuration(container.durationSeconds)} at ${channels} ch needs ~${needs} GB decoded, ceiling is ${ceiling} GB`,
+      );
+    }
   }
 
   let decoded: DecodedAudioLike;
@@ -242,65 +316,114 @@ export async function decodeAudioBlobTo16kMonoPcm(blob: Blob, deps: AudioDecodeD
     );
   }
 
+  // What the decode actually cost, once, on the successful path. This is the
+  // only way to confirm from a real browser that the 16 kHz decoding context
+  // took effect (`decodeAudioData` is specified to resample to the context's
+  // rate, but "specified" is not "observed on this machine") — and if a browser
+  // ever falls back to its hardware rate, the resample below silently absorbs
+  // it and nothing else would ever say so.
+  // eslint-disable-next-line no-console
+  console.info(
+    `[audioDecode] decoded ${decoded.length} frames @ ${decoded.sampleRate} Hz × ${decoded.numberOfChannels} ch` +
+      `${decoded.sampleRate === TARGET_SAMPLE_RATE ? ' (target rate, no resample)' : ` → resampling to ${TARGET_SAMPLE_RATE} Hz`}`,
+  );
+
   const mono = downmixToMono(decoded);
   return resampleLinear(mono, decoded.sampleRate, TARGET_SAMPLE_RATE);
 }
 
-// --- Real-AudioContext Andockpunkt (manual milestone, not unit-tested) ----
+// --- Real-Web-Audio Andockpunkt --------------------------------------------
 //
-// Mirrors `opfsAudio.ts`'s bottom section: a narrow structural interface
-// reached through `globalThis`, not the ambient DOM `AudioContext`
-// identifier (unavailable under `tsconfig.node.json`). `decodeAudioData`
-// only works in a real browser main thread, so this is never exercised by
-// an automated test in this repo — real-codec decode correctness (Opus/AAC)
-// is the plan's stated manual milestone for this unit.
+// Mirrors `opfsAudio.ts`'s bottom section: narrow structural interfaces
+// reached through `globalThis`, not the ambient DOM `AudioContext` identifier
+// (unavailable under `tsconfig.node.json`). Only the final `globalThis`
+// default below is untestable in Node; the CHOICE of context is injected and
+// covered in `audioDecode.test.ts`, because getting that choice wrong is the
+// difference between a 0.6 GB decode and a 1.8 GB one.
 
-interface AudioContextLike {
+interface DecodingContextLike {
   decodeAudioData(arrayBuffer: ArrayBuffer): Promise<DecodedAudioLike>;
-  close(): Promise<void>;
+  /**
+   * Optional on purpose: `close()` is defined on `AudioContext`, not on
+   * `BaseAudioContext`. An `OfflineAudioContext` holds no hardware to release
+   * and has no such method, so calling it unconditionally would throw *after*
+   * an otherwise successful decode.
+   */
+  close?(): Promise<void>;
 }
 
-interface AudioContextCtorLike {
-  new (): AudioContextLike;
-}
-
-function getAudioContextCtor(): AudioContextCtorLike {
-  const scope = globalThis as unknown as {
-    AudioContext?: AudioContextCtorLike;
-    webkitAudioContext?: AudioContextCtorLike;
-  };
-  const ctor = scope.AudioContext ?? scope.webkitAudioContext;
-  if (!ctor) {
-    throw new AudioDecodeError('AUDIO_CONTEXT_UNAVAILABLE', 'no AudioContext available (main-thread browser only)');
-  }
-  return ctor;
+/** The Web Audio surface this module reaches for, in preference order. Injected so the routing below is testable without a browser. */
+export interface DecodingContextEnvLike {
+  OfflineAudioContext?: new (numberOfChannels: number, length: number, sampleRate: number) => DecodingContextLike;
+  webkitOfflineAudioContext?: new (numberOfChannels: number, length: number, sampleRate: number) => DecodingContextLike;
+  AudioContext?: new () => DecodingContextLike;
+  webkitAudioContext?: new () => DecodingContextLike;
 }
 
 /**
- * Real `AudioDecoderLike` backed by a throwaway `AudioContext`: one context
- * per `decode()` call, closed again immediately after (this module never
- * needs to play the audio back or keep the context alive — decoding is the
- * only thing it's used for). Not wired into any caller yet — U15/U19 supply
- * this (or an equivalent) as `AudioDecodeDeps.decode` once they exist; see
- * this unit's report for what's left.
+ * Opens the context `decodeAudioData` will be called on, preferring an
+ * **`OfflineAudioContext` at `TARGET_SAMPLE_RATE`**.
+ *
+ * `decodeAudioData` resamples its result to the sample rate of the context it
+ * is called on. A hardware `AudioContext` takes that rate from the OS (48 kHz
+ * on the machine in the support report), so the decoded buffer arrives three
+ * times larger than anything downstream wants — and then `downmixToMono`
+ * allocates a second copy at the same inflated length. Choosing the rate
+ * instead makes the decode land directly at 16 kHz: a third of the peak, and
+ * `resampleLinear` becomes a passthrough (it returns its input unchanged for
+ * equal rates) rather than a third allocation and a lossy interpolation.
+ *
+ * The second reason is independent of memory: an `OfflineAudioContext` touches
+ * no audio hardware at all. A machine with no output device, or a policy that
+ * blocks the sound device, can no longer fail here — which removes the entire
+ * `AUDIO_CONTEXT_FAILED` class for browsers that have `OfflineAudioContext`.
+ *
+ * Falls back to a hardware `AudioContext` if `OfflineAudioContext` is absent or
+ * refuses the rate (browsers accept a bounded range). The fallback is the old
+ * behaviour exactly — a rate optimisation must never be the reason an import
+ * fails.
  */
-export function createAudioContextDecoder(): AudioDecoderLike {
-  return async (arrayBuffer: ArrayBuffer): Promise<DecodedAudioLike> => {
-    const Ctor = getAudioContextCtor();
-    let context: AudioContextLike;
+export function createDecodingContext(env: DecodingContextEnvLike): DecodingContextLike {
+  const OfflineCtor = env.OfflineAudioContext ?? env.webkitOfflineAudioContext;
+  if (OfflineCtor) {
     try {
-      context = new Ctor();
-    } catch (cause) {
-      // Constructing an AudioContext is not a formality: a machine with no
-      // audio output device, or one under a policy that blocks Web Audio,
-      // fails HERE — and used to surface as "unsupported or corrupt data",
-      // sending everyone off to inspect a perfectly fine file.
-      throw new AudioDecodeError('AUDIO_CONTEXT_FAILED', describeThrown(cause), { cause });
+      // numberOfChannels/length are placeholders for a rendering that never
+      // happens — nothing is ever played or rendered through this context.
+      return new OfflineCtor(1, 1, TARGET_SAMPLE_RATE);
+    } catch {
+      // A browser that rejects 16 kHz: fall through rather than fail.
     }
+  }
+
+  const Ctor = env.AudioContext ?? env.webkitAudioContext;
+  if (!Ctor) {
+    throw new AudioDecodeError('AUDIO_CONTEXT_UNAVAILABLE', 'no Web Audio context available (main-thread browser only)');
+  }
+  try {
+    return new Ctor();
+  } catch (cause) {
+    // Not a formality: a machine with no audio output device, or one under a
+    // policy that blocks Web Audio, fails HERE — and used to surface as
+    // "unsupported or corrupt data", sending everyone off to inspect a
+    // perfectly fine file.
+    throw new AudioDecodeError('AUDIO_CONTEXT_FAILED', describeThrown(cause), { cause });
+  }
+}
+
+/**
+ * Real `AudioDecoderLike`: one throwaway decoding context per `decode()` call,
+ * released again immediately after (this module never plays anything back —
+ * decoding is the only thing a context is used for here).
+ */
+export function createAudioContextDecoder(
+  env: DecodingContextEnvLike = globalThis as unknown as DecodingContextEnvLike,
+): AudioDecoderLike {
+  return async (arrayBuffer: ArrayBuffer): Promise<DecodedAudioLike> => {
+    const context = createDecodingContext(env);
     try {
       return await context.decodeAudioData(arrayBuffer);
     } finally {
-      await context.close();
+      await context.close?.();
     }
   };
 }
