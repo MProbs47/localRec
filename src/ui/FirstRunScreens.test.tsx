@@ -78,3 +78,96 @@ describe('ErrorScreen', () => {
     expect(onStartDownload).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * The coded-failure surface (see `ErrorScreen`'s header). What matters here is
+ * that a user who cannot open DevTools can still get the report OFF the
+ * machine — so the copy path and, crucially, its failure fallback are both
+ * pinned down.
+ */
+describe('ErrorScreen: coded failures', () => {
+  const REPORT = 'localRec audio decode report\ncode: AUDIO_DECODE_REJECTED\ncodecs: aac-lc=no';
+
+  function renderCoded(overrides: { errorDetails?: string | null } = {}) {
+    return render(
+      <ErrorScreen
+        errorHeadline="Verarbeitung fehlgeschlagen."
+        errorMessage="The browser cannot decode this file’s audio codec."
+        errorCode="AUDIO_DECODE_REJECTED"
+        errorDetails={'errorDetails' in overrides ? overrides.errorDetails : REPORT}
+        modelLoadFailed={false}
+        onStartDownload={vi.fn()}
+      />,
+    );
+  }
+
+  it('shows the code, the one-line description and the copy button — and nothing else', () => {
+    const { container, getByRole } = renderCoded();
+
+    expect(container.querySelector('.first-run__error-code')?.textContent).toBe('AUDIO_DECODE_REJECTED');
+    expect(container.textContent).toContain('The browser cannot decode this file’s audio codec.');
+    expect(getByRole('button', { name: 'Copy error details' })).not.toBeNull();
+    // The report itself stays behind the button while copying still works —
+    // the display has room for about three lines.
+    expect(container.querySelector('.first-run__error-report')).toBeNull();
+  });
+
+  it('copies the full report verbatim and confirms it', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const { getByRole, findByRole } = renderCoded();
+
+    fireEvent.click(getByRole('button', { name: 'Copy error details' }));
+
+    expect(writeText).toHaveBeenCalledWith(REPORT);
+    expect(await findByRole('button', { name: 'Copied' })).not.toBeNull();
+  });
+
+  it('reveals the report for hand-selection when the clipboard is unavailable', async () => {
+    // Without this the one thing the screen exists for — getting the report
+    // off a locked-down machine — would be impossible on a browser with no
+    // Clipboard API.
+    // @ts-expect-error deleting an optional navigator member for this test
+    delete navigator.clipboard;
+    const { container, getByRole, findByRole } = renderCoded();
+
+    fireEvent.click(getByRole('button', { name: 'Copy error details' }));
+
+    expect(await findByRole('button', { name: 'Copy failed — select below' })).not.toBeNull();
+    expect(container.querySelector('.first-run__error-report')?.textContent).toBe(REPORT);
+  });
+
+  it('reveals the report when the clipboard write is rejected (insecure context, denied permission)', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.reject(new Error('denied')) },
+      configurable: true,
+    });
+    const { container, getByRole, findByRole } = renderCoded();
+
+    fireEvent.click(getByRole('button', { name: 'Copy error details' }));
+
+    await findByRole('button', { name: 'Copy failed — select below' });
+    expect(container.querySelector('.first-run__error-report')?.textContent).toBe(REPORT);
+  });
+
+  it('leaves the uncoded error screen exactly as it was — no code line, no copy button', () => {
+    const { container, queryByRole } = render(
+      <ErrorScreen
+        errorHeadline="Modell konnte nicht geladen werden."
+        errorMessage="network error"
+        modelLoadFailed={false}
+        onStartDownload={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('.first-run__error-code')).toBeNull();
+    expect(queryByRole('button', { name: 'Copy error details' })).toBeNull();
+  });
+
+  it('omits the copy button when a code arrived without a report', () => {
+    const { container, queryByRole } = renderCoded({ errorDetails: null });
+
+    expect(container.querySelector('.first-run__error-code')?.textContent).toBe('AUDIO_DECODE_REJECTED');
+    expect(queryByRole('button', { name: 'Copy error details' })).toBeNull();
+  });
+});

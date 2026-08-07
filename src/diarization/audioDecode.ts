@@ -62,21 +62,67 @@
  * U20 (the unit that owns chunked/paced import decoding), not attempted now.
  */
 import { resampleLinear } from '../audio/resample';
+import { describeThrown } from './audioDiagnostics';
 
 /** 16 kHz mono is the fixed target for every model in this codebase (KTD10) — diarization (U15) and batch-transcription (U20) both consume exactly this shape. */
 export const TARGET_SAMPLE_RATE = 16000;
 
 /**
+ * Which step failed. One code per *distinct cause*, because these four used
+ * to collapse into one "unsupported or corrupt data" message and that message
+ * cost a real support case its diagnosis: a customer's Edge produced it for a
+ * file their own audio player played, and nothing in the app could say
+ * whether the codec was missing, the container broken, or the `AudioContext`
+ * never opened at all. A code the user can read out loud is the cheapest
+ * possible fix for that, and `audioDiagnostics.ts` supplies the rest.
+ */
+export type AudioDecodeErrorCode =
+  | 'AUDIO_EMPTY_FILE'
+  | 'AUDIO_READ_FAILED'
+  | 'AUDIO_CONTEXT_UNAVAILABLE'
+  | 'AUDIO_CONTEXT_FAILED'
+  | 'AUDIO_DECODE_REJECTED'
+  | 'AUDIO_DECODE_EMPTY';
+
+/**
+ * One short English line per code, shown under the localised headline on the
+ * error screen. **Deliberately not translated** (owner's call): these are
+ * support text, and a report that reads the same in every locale is one that
+ * can be compared across users and pasted into an issue as-is. The localised
+ * part of that screen stays the headline above it.
+ */
+export const AUDIO_DECODE_CODE_DESCRIPTIONS: Record<AudioDecodeErrorCode, string> = {
+  AUDIO_EMPTY_FILE: 'The selected file contains no data.',
+  AUDIO_READ_FAILED: 'The file could not be read from disk.',
+  AUDIO_CONTEXT_UNAVAILABLE: 'This browser has no Web Audio support.',
+  AUDIO_CONTEXT_FAILED: 'The browser could not open an audio context on this device.',
+  AUDIO_DECODE_REJECTED: 'The browser cannot decode this file’s audio codec.',
+  AUDIO_DECODE_EMPTY: 'The audio track decoded to zero samples.',
+};
+
+/**
  * Thrown for any failure in this module — an empty/zero-byte blob, a blob
- * whose bytes couldn't even be read, or a blob the decoder rejected as
- * unsupported/corrupt audio. Callers (U15's diarization trigger, U19/U20's
- * import path) get one clean, typed failure to catch and surface as a UX
- * error, never a raw decoder exception or a hang.
+ * whose bytes couldn't even be read, a browser that wouldn't open an audio
+ * context, or a blob the decoder rejected as unsupported/corrupt audio.
+ * Callers (U15's diarization trigger, U19/U20's import path) get one clean,
+ * typed failure to catch and surface as a UX error, never a raw decoder
+ * exception or a hang — but now with a `code` saying *which* of those it was.
  */
 export class AudioDecodeError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
+  /** Which step failed — the discriminating fact, kept as data rather than only as prose in `message`. */
+  readonly code: AudioDecodeErrorCode;
+  /**
+   * The copy-paste support report (`audioDiagnostics.ts`), attached only when
+   * a `diagnose` collector was supplied — absent in tests and in any caller
+   * that doesn't want the extra file re-read.
+   */
+  readonly details?: string;
+
+  constructor(code: AudioDecodeErrorCode, message: string, options?: { cause?: unknown; details?: string }) {
+    super(`${code}: ${message}`, { cause: options?.cause });
     this.name = 'AudioDecodeError';
+    this.code = code;
+    this.details = options?.details;
   }
 }
 
@@ -99,8 +145,23 @@ export interface DecodedAudioLike {
 /** Takes the raw encoded bytes, returns decoded PCM. A real `AudioContext.decodeAudioData` (bound) satisfies this signature structurally. */
 export type AudioDecoderLike = (arrayBuffer: ArrayBuffer) => Promise<DecodedAudioLike>;
 
+/**
+ * Builds the copy-paste report for a failure. Takes the original `Blob` (not
+ * the `ArrayBuffer` the decode attempt used — Chromium's `decodeAudioData`
+ * detaches that buffer, so it is empty by the time this runs) and must never
+ * throw; a rejection here is swallowed so diagnostics can't mask the real
+ * failure. Production: `collectAudioDecodeDiagnostics` from
+ * `audioDiagnostics.ts`.
+ */
+export type AudioDecodeDiagnose = (
+  blob: Blob,
+  failure: { code: AudioDecodeErrorCode; cause: unknown },
+) => Promise<string>;
+
 export interface AudioDecodeDeps {
   decode: AudioDecoderLike;
+  /** Optional — omitted, the thrown `AudioDecodeError` still carries its `code`, just no report. */
+  diagnose?: AudioDecodeDiagnose;
 }
 
 /** Sum of all channels divided by channel count, per sample — see file header for why this beats "channel 0 only". Works unchanged for the already-mono case (division by 1). */
@@ -131,22 +192,54 @@ function downmixToMono(decoded: DecodedAudioLike): Float32Array {
  * decoder exception or a hang reach the caller.
  */
 export async function decodeAudioBlobTo16kMonoPcm(blob: Blob, deps: AudioDecodeDeps): Promise<Float32Array> {
+  /** Builds the diagnostics (best-effort) and throws the coded error. Every failure below goes through here so none can forget the report. */
+  const fail = async (code: AudioDecodeErrorCode, message: string, cause?: unknown): Promise<never> => {
+    let details: string | undefined;
+    if (deps.diagnose) {
+      try {
+        details = await deps.diagnose(blob, { code, cause });
+      } catch {
+        // Diagnostics are a nice-to-have; the real failure below is not.
+        // Swallowing here is what guarantees this module can only ever throw
+        // the error it set out to throw.
+      }
+    }
+    throw new AudioDecodeError(code, message, { cause, details });
+  };
+
   if (blob.size === 0) {
-    throw new AudioDecodeError('audioDecode: blob is empty (0 bytes) — nothing to decode');
+    return fail('AUDIO_EMPTY_FILE', 'blob is empty (0 bytes) — nothing to decode');
   }
 
   let arrayBuffer: ArrayBuffer;
   try {
     arrayBuffer = await blob.arrayBuffer();
   } catch (cause) {
-    throw new AudioDecodeError('audioDecode: failed to read blob bytes', { cause });
+    return fail('AUDIO_READ_FAILED', 'failed to read blob bytes', cause);
   }
 
   let decoded: DecodedAudioLike;
   try {
     decoded = await deps.decode(arrayBuffer);
   } catch (cause) {
-    throw new AudioDecodeError('audioDecode: failed to decode audio (unsupported or corrupt data)', { cause });
+    // `createAudioContextDecoder` throws its OWN coded errors for "no
+    // AudioContext constructor" and "the constructor refused" — both used to
+    // arrive here indistinguishable from a rejected decode (the `new Ctor()`
+    // call sits inside the async decoder, so its throw lands in this catch).
+    // Keeping their code is the whole point: a machine with no audio output
+    // device must not be reported as a corrupt file.
+    const code = cause instanceof AudioDecodeError ? cause.code : 'AUDIO_DECODE_REJECTED';
+    return fail(code, describeThrown(cause), cause);
+  }
+
+  // A decoder that resolves with nothing is not a success: `sampleRate === 0`
+  // would divide by zero in `resampleLinear`, and zero frames would hand
+  // Whisper an empty buffer that "transcribes" to nothing at all.
+  if (!(decoded.length > 0) || !(decoded.sampleRate > 0)) {
+    return fail(
+      'AUDIO_DECODE_EMPTY',
+      `decoder returned ${decoded.length} frames at ${decoded.sampleRate} Hz`,
+    );
   }
 
   const mono = downmixToMono(decoded);
@@ -178,7 +271,7 @@ function getAudioContextCtor(): AudioContextCtorLike {
   };
   const ctor = scope.AudioContext ?? scope.webkitAudioContext;
   if (!ctor) {
-    throw new AudioDecodeError('audioDecode: no AudioContext available (main-thread browser only)');
+    throw new AudioDecodeError('AUDIO_CONTEXT_UNAVAILABLE', 'no AudioContext available (main-thread browser only)');
   }
   return ctor;
 }
@@ -194,7 +287,16 @@ function getAudioContextCtor(): AudioContextCtorLike {
 export function createAudioContextDecoder(): AudioDecoderLike {
   return async (arrayBuffer: ArrayBuffer): Promise<DecodedAudioLike> => {
     const Ctor = getAudioContextCtor();
-    const context = new Ctor();
+    let context: AudioContextLike;
+    try {
+      context = new Ctor();
+    } catch (cause) {
+      // Constructing an AudioContext is not a formality: a machine with no
+      // audio output device, or one under a policy that blocks Web Audio,
+      // fails HERE — and used to surface as "unsupported or corrupt data",
+      // sending everyone off to inspect a perfectly fine file.
+      throw new AudioDecodeError('AUDIO_CONTEXT_FAILED', describeThrown(cause), { cause });
+    }
     try {
       return await context.decodeAudioData(arrayBuffer);
     } finally {

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ImportPhase } from '../session/importPipeline';
 import { t } from '../i18n';
 import { formatElapsedShort } from './format';
@@ -74,23 +75,73 @@ export function ImportingScreen({
   );
 }
 
+/**
+ * The error screen. Beyond the headline + one-line detail it has carried
+ * since U20b, a *coded* failure (today: `AudioDecodeError`, see
+ * `audioDecode.ts`) also gets its code and a "Copy error details" button.
+ *
+ * **Why the code and the button and nothing more.** The screen is inside the
+ * device display and has room for about three lines; the support case that
+ * motivated this involved a user whose organisation blocks DevTools, so the
+ * report has to leave the machine through the clipboard rather than be read
+ * on screen. Code + one line + one button is the whole visible surface; the
+ * multi-line report stays behind the button.
+ *
+ * **English, not localised** — see `AUDIO_DECODE_CODE_DESCRIPTIONS`'s comment:
+ * comparable support text beats a translated error code. The headline above
+ * remains localised.
+ *
+ * The copy path mirrors `InfoView`'s `PromptBlock` (no `execCommand`
+ * fallback, no toast system, never throws) with one addition: a *failed* copy
+ * reveals the report in a `<pre>` so the text is still selectable by hand.
+ * Without that, a browser with no Clipboard API would leave the user with no
+ * way at all to get the report out — which is the one thing this screen
+ * exists to prevent.
+ */
 export function ErrorScreen({
   errorHeadline,
   errorMessage,
+  errorCode,
+  errorDetails,
   modelLoadFailed,
   onStartDownload,
 }: {
   /** U20b: the `error` screen's headline — context-dependent (model load vs. import), see `App`'s `errorHeadline` state. */
   errorHeadline: string;
   errorMessage: string | null;
+  /** The machine-readable failure code, when the error carried one (`AudioDecodeErrorCode`). Rendered verbatim so the user can read it out over the phone. */
+  errorCode?: string | null;
+  /** The copy-paste support report, when one was collected (`audioDiagnostics.ts`). Gates the copy button. */
+  errorDetails?: string | null;
   /** #6: whether the current error screen is a retryable model-load failure — shows the "Erneut versuchen" button. */
   modelLoadFailed: boolean;
   onStartDownload: () => void;
 }) {
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+
+  const handleCopy = () => {
+    const clipboard = typeof navigator === 'object' ? navigator.clipboard : undefined;
+    if (!clipboard || typeof clipboard.writeText !== 'function' || !errorDetails) {
+      setCopyStatus('failed'); // no Clipboard API — the <pre> below takes over
+      return;
+    }
+    clipboard.writeText(errorDetails).then(
+      () => setCopyStatus('copied'),
+      () => setCopyStatus('failed'), // permission denied, insecure context, ... — never throws
+    );
+  };
+
   return (
     <div className="first-run first-run--error" role="alert">
       <p className="first-run__message">{errorHeadline}</p>
+      {errorCode && <p className="first-run__error-code">{errorCode}</p>}
       <p className="first-run__error-detail">{errorMessage}</p>
+      {errorDetails && (
+        <button type="button" className="first-run__copy" onClick={handleCopy}>
+          {copyStatus === 'copied' ? 'Copied' : copyStatus === 'failed' ? 'Copy failed — select below' : 'Copy error details'}
+        </button>
+      )}
+      {errorDetails && copyStatus === 'failed' && <pre className="first-run__error-report">{errorDetails}</pre>}
       {/* #6: a transient model-download blip no longer bricks the session —
           offer a retry (only for model-load failures, not import errors). */}
       {modelLoadFailed && (

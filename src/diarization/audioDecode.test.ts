@@ -7,12 +7,15 @@
 // downmix/resample/error-handling logic runs unmocked against it. Real-codec
 // decode correctness (Opus/AAC via a real `AudioContext`) stays a manual
 // browser milestone.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  AUDIO_DECODE_CODE_DESCRIPTIONS,
   AudioDecodeError,
   decodeAudioBlobTo16kMonoPcm,
   TARGET_SAMPLE_RATE,
   type AudioDecodeDeps,
+  type AudioDecodeDiagnose,
+  type AudioDecodeErrorCode,
   type DecodedAudioLike,
 } from './audioDecode';
 
@@ -150,5 +153,148 @@ describe('decodeAudioBlobTo16kMonoPcm: error path (test scenario 4)', () => {
   it('never hangs: a rejecting decode resolves the returned promise (rejected), not indefinitely pending', async () => {
     const deps: AudioDecodeDeps = { decode: async () => { throw new Error('corrupt'); } };
     await expect(decodeAudioBlobTo16kMonoPcm(nonEmptyBlob(), deps)).rejects.toThrow();
+  });
+});
+
+/** Awaits a rejection and narrows it to this module's own error type — every assertion below reads its `code`/`details`/`cause`. */
+async function rejectionOf(promise: Promise<unknown>): Promise<AudioDecodeError> {
+  const thrown = await promise.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(thrown).toBeInstanceOf(AudioDecodeError);
+  return thrown as AudioDecodeError;
+}
+
+async function codeOf(promise: Promise<unknown>): Promise<AudioDecodeErrorCode> {
+  return (await rejectionOf(promise)).code;
+}
+
+/**
+ * These four used to be ONE message ("unsupported or corrupt data"), and that
+ * cost a real support case its diagnosis — a customer's Edge produced it for a
+ * file their own audio player played fine, with no way to tell a missing codec
+ * from an `AudioContext` that never opened. The codes below are the fix, so
+ * each one is pinned to the failure it is supposed to name.
+ */
+describe('decodeAudioBlobTo16kMonoPcm: error codes are distinct per cause', () => {
+  it('a 0-byte file is AUDIO_EMPTY_FILE, not a decode failure', async () => {
+    const deps: AudioDecodeDeps = { decode: async () => { throw new Error('should not be reached'); } };
+    expect(await codeOf(decodeAudioBlobTo16kMonoPcm(new Blob([]), deps))).toBe('AUDIO_EMPTY_FILE');
+  });
+
+  it('an unreadable blob is AUDIO_READ_FAILED, not a decode failure', async () => {
+    // A `File` whose backing bytes vanished (moved/deleted after picking) —
+    // `arrayBuffer()` rejects before any decoder is involved.
+    const blob = { size: 42, type: 'audio/mp4', arrayBuffer: async () => { throw new DOMException('not found', 'NotFoundError'); } } as unknown as Blob;
+    const deps: AudioDecodeDeps = { decode: async () => { throw new Error('should not be reached'); } };
+
+    expect(await codeOf(decodeAudioBlobTo16kMonoPcm(blob, deps))).toBe('AUDIO_READ_FAILED');
+  });
+
+  it('a rejected decode is AUDIO_DECODE_REJECTED and keeps the DOMException name in its message', async () => {
+    const deps: AudioDecodeDeps = {
+      decode: async () => { throw new DOMException('Unable to decode audio data', 'EncodingError'); },
+    };
+
+    const error = await rejectionOf(decodeAudioBlobTo16kMonoPcm(nonEmptyBlob(), deps));
+
+    expect(error.code).toBe('AUDIO_DECODE_REJECTED');
+    // The name is the half that says WHAT went wrong; losing it was the
+    // original defect.
+    expect(error.message).toContain('EncodingError');
+    expect(error.cause).toBeInstanceOf(DOMException);
+  });
+
+  it("keeps a nested AudioDecodeError's own code instead of relabelling it as a decode rejection", async () => {
+    // `createAudioContextDecoder` constructs its AudioContext INSIDE the
+    // decoder, so a machine with no audio output device throws from in there —
+    // and used to be reported as a corrupt file.
+    const deps: AudioDecodeDeps = {
+      decode: async () => {
+        throw new AudioDecodeError('AUDIO_CONTEXT_FAILED', 'NotSupportedError: no audio device');
+      },
+    };
+
+    expect(await codeOf(decodeAudioBlobTo16kMonoPcm(nonEmptyBlob(), deps))).toBe('AUDIO_CONTEXT_FAILED');
+  });
+
+  it('a decode that resolves with nothing is AUDIO_DECODE_EMPTY, not a silent empty transcript', async () => {
+    const deps = depsFor(fakeDecoded(TARGET_SAMPLE_RATE, [new Float32Array(0)]));
+    expect(await codeOf(decodeAudioBlobTo16kMonoPcm(nonEmptyBlob(), deps))).toBe('AUDIO_DECODE_EMPTY');
+  });
+
+  it('a zero sample rate is AUDIO_DECODE_EMPTY rather than a divide-by-zero resample', async () => {
+    const deps = depsFor(fakeDecoded(0, [new Float32Array(16)]));
+    expect(await codeOf(decodeAudioBlobTo16kMonoPcm(nonEmptyBlob(), deps))).toBe('AUDIO_DECODE_EMPTY');
+  });
+
+  it('every code has a short English description for the error screen', () => {
+    const codes: AudioDecodeErrorCode[] = [
+      'AUDIO_EMPTY_FILE',
+      'AUDIO_READ_FAILED',
+      'AUDIO_CONTEXT_UNAVAILABLE',
+      'AUDIO_CONTEXT_FAILED',
+      'AUDIO_DECODE_REJECTED',
+      'AUDIO_DECODE_EMPTY',
+    ];
+    for (const code of codes) {
+      const description = AUDIO_DECODE_CODE_DESCRIPTIONS[code];
+      expect(description, code).toBeTruthy();
+      // One line, display-sized: the screen has room for about three.
+      expect(description.length, code).toBeLessThanOrEqual(80);
+      expect(description, code).not.toContain('\n');
+    }
+  });
+});
+
+describe('decodeAudioBlobTo16kMonoPcm: the diagnostics hook', () => {
+  it('attaches the collected report to the thrown error, with the blob and the failing code', async () => {
+    const diagnose = vi.fn<AudioDecodeDiagnose>(async () => 'localRec audio decode report\ncode: AUDIO_DECODE_REJECTED');
+    const blob = nonEmptyBlob();
+    const deps: AudioDecodeDeps = {
+      decode: async () => { throw new DOMException('Unable to decode audio data', 'EncodingError'); },
+      diagnose,
+    };
+
+    const error = await rejectionOf(decodeAudioBlobTo16kMonoPcm(blob, deps));
+
+    expect(error.details).toContain('localRec audio decode report');
+    expect(diagnose).toHaveBeenCalledTimes(1);
+    // The blob, NOT the ArrayBuffer: `decodeAudioData` detaches the buffer it
+    // is handed, so the collector has to re-read from the file itself.
+    expect(diagnose.mock.calls[0][0]).toBe(blob);
+    expect(diagnose.mock.calls[0][1].code).toBe('AUDIO_DECODE_REJECTED');
+  });
+
+  it('never lets a broken collector mask the real failure', async () => {
+    const deps: AudioDecodeDeps = {
+      decode: async () => { throw new DOMException('Unable to decode audio data', 'EncodingError'); },
+      diagnose: async () => { throw new Error('diagnostics itself is buggy'); },
+    };
+
+    const error = await rejectionOf(decodeAudioBlobTo16kMonoPcm(nonEmptyBlob(), deps));
+
+    expect(error).toBeInstanceOf(AudioDecodeError);
+    expect(error.code).toBe('AUDIO_DECODE_REJECTED');
+    expect(error.details).toBeUndefined();
+  });
+
+  it('is optional — without it the coded error still arrives, just report-less', async () => {
+    const deps: AudioDecodeDeps = { decode: async () => { throw new Error('corrupt'); } };
+
+    const error = await rejectionOf(decodeAudioBlobTo16kMonoPcm(nonEmptyBlob(), deps));
+
+    expect(error.code).toBe('AUDIO_DECODE_REJECTED');
+    expect(error.details).toBeUndefined();
+  });
+
+  it('is not called on the happy path', async () => {
+    const diagnose = vi.fn<AudioDecodeDiagnose>(async () => 'never');
+    const deps: AudioDecodeDeps = { ...depsFor(fakeDecoded(TARGET_SAMPLE_RATE, [new Float32Array(160)])), diagnose };
+
+    await decodeAudioBlobTo16kMonoPcm(nonEmptyBlob(), deps);
+
+    expect(diagnose).not.toHaveBeenCalled();
   });
 });

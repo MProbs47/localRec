@@ -105,7 +105,14 @@ import { canCaptureSystemAudio, captureSystemAudio, SystemAudioError } from './a
 import { LiveCapture } from './audio/liveCapture';
 import type { PickedAudioFile } from './input/audioFileSource';
 import { runImport, type ImportPhase } from './session/importPipeline';
-import { decodeAudioBlobTo16kMonoPcm, createAudioContextDecoder } from './diarization/audioDecode';
+import {
+  decodeAudioBlobTo16kMonoPcm,
+  createAudioContextDecoder,
+  AudioDecodeError,
+  AUDIO_DECODE_CODE_DESCRIPTIONS,
+  type AudioDecodeDeps,
+} from './diarization/audioDecode';
+import { collectAudioDecodeDiagnostics } from './diarization/audioDiagnostics';
 import { runDiarization } from './session/diarizationRun';
 import type { AlignedSegment } from './diarization/align';
 import { Engine } from './engine/engine';
@@ -139,6 +146,21 @@ import './ui/theme.css';
  */
 export type DeviceState = 'idle' | 'downloading' | 'ready' | 'recording' | 'stopped' | 'recovery' | 'error' | 'importing';
 
+/**
+ * The production decode seam, in ONE place for both post-hoc entry points
+ * (KTD16: import and speaker annotation share the pipeline from the decode
+ * onwards, so they must share its failure behaviour too — the two call sites
+ * below used to build this inline and could have drifted apart).
+ *
+ * Safe at module scope despite `AudioContext` being browser-only:
+ * `createAudioContextDecoder()` looks the constructor up *inside* the function
+ * it returns, so importing this module under Vitest constructs nothing.
+ */
+const PRODUCTION_DECODE_DEPS: AudioDecodeDeps = {
+  decode: createAudioContextDecoder(),
+  diagnose: collectAudioDecodeDiagnostics,
+};
+
 export default function App() {
   // U4/KTD3: subscribes App to the locale store so the WHOLE tree re-renders
   // on every `setLocale()` call (from `LocaleSwitch`, top-right) — `t()` is a
@@ -161,6 +183,14 @@ export default function App() {
   // `deviceState` is `idle`/`ready` (see the `.panel-wrap` JSX).
   const [infoOpen, setInfoOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // A coded failure (today only `AudioDecodeError`) additionally shows its
+  // code and a "copy the report" button — see `ErrorScreen`. Kept as two
+  // separate pieces of state rather than folded into `errorMessage` because
+  // the code is read out loud and the report is pasted; they are consumed by
+  // people, differently. Both stay null for every uncoded error, which is
+  // what keeps the model-load error screen looking exactly as before.
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
   // U20b: the `error` screen's headline is context-dependent (model load vs.
   // import) — `errorMessage` alone stays a detail line under whichever
   // headline is current. Defaults to the pre-existing model-load copy so
@@ -445,7 +475,7 @@ export default function App() {
         { audio, segments, knownSpeakerCount: knownSpeakerCount ?? undefined },
         {
           worker: engine.diarizer(),
-          decode: (blob) => decodeAudioBlobTo16kMonoPcm(blob, { decode: createAudioContextDecoder() }),
+          decode: (blob) => decodeAudioBlobTo16kMonoPcm(blob, PRODUCTION_DECODE_DEPS),
         },
         (fraction) => setAnnotationProgress(fraction),
       );
@@ -511,7 +541,7 @@ export default function App() {
       setDeviceState('importing');
 
       runImport(blob, {
-        decode: (b) => decodeAudioBlobTo16kMonoPcm(b, { decode: createAudioContextDecoder() }),
+        decode: (b) => decodeAudioBlobTo16kMonoPcm(b, PRODUCTION_DECODE_DEPS),
         // U7: `engine.transcribeFile` hides the transfer + progress-proxy.
         transcribeFile: (pcm, opts) => engine.transcribeFile(pcm, opts?.onProgress, language),
         coordinator: coordinatorRef.current!,
@@ -537,7 +567,20 @@ export default function App() {
         })
         .catch((error: unknown) => {
           setErrorHeadline(t('error.importFailedHeadline'));
-          setErrorMessage(error instanceof Error ? error.message : t('error.importFailedDetailFallback'));
+          if (error instanceof AudioDecodeError) {
+            // The whole point of Teil 1: the screen now names WHICH failure it
+            // was and hands over a report the user can paste, instead of one
+            // generic sentence that fit four unrelated causes.
+            setErrorCode(error.code);
+            setErrorMessage(AUDIO_DECODE_CODE_DESCRIPTIONS[error.code]);
+            setErrorDetails(error.details ?? null);
+            // eslint-disable-next-line no-console
+            console.error('[import] decode failed:', error.message, error.cause, '\n', error.details);
+          } else {
+            setErrorCode(null);
+            setErrorDetails(null);
+            setErrorMessage(error instanceof Error ? error.message : t('error.importFailedDetailFallback'));
+          }
           setDeviceState('error');
         });
     },
@@ -714,6 +757,10 @@ export default function App() {
       // earlier import failure never leaks into a later model-load error.
       setErrorHeadline(t('error.modelLoadHeadline'));
       setErrorMessage(engineSnapshot.error ?? t('error.modelLoadHeadline'));
+      // Same reason as the headline above: a model-load failure must not
+      // inherit an earlier import failure's code or report.
+      setErrorCode(null);
+      setErrorDetails(null);
       setDeviceState('error');
     }
   }, [engineSnapshot.status, engineSnapshot.error]);
@@ -1162,6 +1209,8 @@ export default function App() {
         <ErrorScreen
           errorHeadline={errorHeadline}
           errorMessage={errorMessage}
+          errorCode={errorCode}
+          errorDetails={errorDetails}
           modelLoadFailed={engineSnapshot.status === 'failed'}
           onStartDownload={beginModelLoad}
         />
