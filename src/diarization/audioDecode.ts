@@ -62,13 +62,7 @@
  * U20 (the unit that owns chunked/paced import decoding), not attempted now.
  */
 import { resampleLinear } from '../audio/resample';
-import {
-  describeThrown,
-  estimateDecodeBytes,
-  formatDuration,
-  sniffContainer,
-  type ContainerInfo,
-} from './audioDiagnostics';
+import { describeThrown, sniffContainer, type ContainerInfo } from './audioDiagnostics';
 
 /** 16 kHz mono is the fixed target for every model in this codebase (KTD10) — diarization (U15) and batch-transcription (U20) both consume exactly this shape. */
 export const TARGET_SAMPLE_RATE = 16000;
@@ -85,32 +79,10 @@ export const TARGET_SAMPLE_RATE = 16000;
 export type AudioDecodeErrorCode =
   | 'AUDIO_EMPTY_FILE'
   | 'AUDIO_READ_FAILED'
-  | 'AUDIO_TOO_LONG'
   | 'AUDIO_CONTEXT_UNAVAILABLE'
   | 'AUDIO_CONTEXT_FAILED'
   | 'AUDIO_DECODE_REJECTED'
   | 'AUDIO_DECODE_EMPTY';
-
-/**
- * The ceiling for a whole-file decode's peak allocation, above which the length
- * guard refuses before spending minutes on a decode that cannot succeed.
- *
- * **This is a starting value, not a measured one — retune it from a real device
- * run.** There is no honest browser API to derive it from: `performance.memory`
- * is Chromium-only and reports the JS heap, not the audio allocation, and the
- * web exposes no device-memory figure at all. So it is a constant, and the
- * repo's own rule applies — measure, don't guess.
- *
- * Deliberately GENEROUS. A false rejection is worse than a late failure,
- * because it looks authoritative and cannot be argued with, while an actual
- * allocation failure at least produces a real report. 1.5 GB allows roughly
- * 2 h 10 of stereo at 16 kHz and refuses the 2 h 40 interview that motivated
- * the guard (~1.8 GB).
- *
- * Obsolete for mp4 the day chunked decoding lands, which has a completely
- * different ceiling — kept as one constant and one message on purpose.
- */
-export const MAX_DECODE_PEAK_BYTES = 1_500_000_000;
 
 /**
  * One short English line per code, shown under the localised headline on the
@@ -122,7 +94,6 @@ export const MAX_DECODE_PEAK_BYTES = 1_500_000_000;
 export const AUDIO_DECODE_CODE_DESCRIPTIONS: Record<AudioDecodeErrorCode, string> = {
   AUDIO_EMPTY_FILE: 'The selected file contains no data.',
   AUDIO_READ_FAILED: 'The file could not be read from disk.',
-  AUDIO_TOO_LONG: 'This recording is too long to decode in the browser.',
   AUDIO_CONTEXT_UNAVAILABLE: 'This browser has no Web Audio support.',
   AUDIO_CONTEXT_FAILED: 'The browser could not open an audio context on this device.',
   AUDIO_DECODE_REJECTED: 'The browser cannot decode this file’s audio codec.',
@@ -187,7 +158,7 @@ export type AudioDecodeDiagnose = (
   failure: {
     code: AudioDecodeErrorCode;
     cause: unknown;
-    /** The container this module already sniffed for its length guard — passed on so the collector need not re-read the whole file. */
+    /** The container this module already sniffed before decoding — passed on so the collector need not re-read the whole file. */
     container?: ContainerInfo;
     /** The rate the decoding context runs at, so the report's cost estimate matches what actually happened. */
     decodeSampleRate?: number;
@@ -265,40 +236,12 @@ export async function decodeAudioBlobTo16kMonoPcm(blob: Blob, deps: AudioDecodeD
     return fail('AUDIO_READ_FAILED', 'failed to read blob bytes', cause);
   }
 
-  // Walk the container BEFORE decoding, for two reasons. It yields the duration
-  // the length guard below needs, and it must happen while the bytes are still
-  // ours: `decodeAudioData` takes ownership of the `ArrayBuffer` and detaches
-  // it, so nothing can be read from it afterwards. Cheap regardless of file
-  // size — `mdat` is skipped by its declared size, never read.
+  // Walk the container BEFORE decoding, and while the bytes are still ours:
+  // `decodeAudioData` takes ownership of the `ArrayBuffer` and detaches it, so
+  // nothing can be read from it afterwards. Cheap regardless of file size —
+  // `mdat` is skipped by its declared size, never read. The result travels into
+  // the failure path so a report needs no second read of the file.
   container = sniffContainer(new Uint8Array(arrayBuffer));
-
-  // The length guard. Only fires when the duration is actually known: guessing
-  // a length for a container that doesn't carry one would refuse files that
-  // would have worked, and a false refusal is the worse failure (it looks
-  // authoritative, where a real allocation failure at least yields a report).
-  //
-  // KNOWN LIMITATION: the estimate assumes the decode lands at
-  // `TARGET_SAMPLE_RATE`, which is what `createDecodingContext` arranges. This
-  // function cannot verify it — the context lives inside the injected
-  // `deps.decode`, by design. On a browser with no `OfflineAudioContext` the
-  // fallback decodes at the hardware rate and the estimate is optimistic by
-  // that ratio, so an over-long file slips past the guard and fails for real
-  // instead. Accepted rather than plumbed: `OfflineAudioContext` has been
-  // universal for a decade, the failure mode degrades to the pre-guard
-  // behaviour, and the `console.info` below reports the rate actually used, so
-  // the mismatch is observable rather than invisible.
-  if (container.durationSeconds !== undefined) {
-    const channels = container.audioChannels ?? 2; // pessimistic: stereo costs twice mono
-    const estimate = estimateDecodeBytes(container.durationSeconds, channels, TARGET_SAMPLE_RATE);
-    if (estimate.peakBytes > MAX_DECODE_PEAK_BYTES) {
-      const needs = (estimate.peakBytes / 1024 ** 3).toFixed(2);
-      const ceiling = (MAX_DECODE_PEAK_BYTES / 1024 ** 3).toFixed(2);
-      return fail(
-        'AUDIO_TOO_LONG',
-        `${formatDuration(container.durationSeconds)} at ${channels} ch needs ~${needs} GB decoded, ceiling is ${ceiling} GB`,
-      );
-    }
-  }
 
   let decoded: DecodedAudioLike;
   try {

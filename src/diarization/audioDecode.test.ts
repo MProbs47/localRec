@@ -15,7 +15,6 @@ import {
   createDecodingContext,
   decodeAudioBlobTo16kMonoPcm,
   describeDecodingContext,
-  MAX_DECODE_PEAK_BYTES,
   TARGET_SAMPLE_RATE,
   type AudioDecodeDeps,
   type AudioDecodeDiagnose,
@@ -304,14 +303,13 @@ describe('decodeAudioBlobTo16kMonoPcm: the diagnostics hook', () => {
 });
 
 /**
- * The length guard. A 2 h 40 interview is what finally explained the support
- * case: 95 MB of file, but ~1.8 GB of decoded PCM even at 16 kHz, which no
- * renderer allocates. Before this guard the browser ground for minutes and then
- * reported the failure as a codec problem — the guard turns that into an
- * immediate, honest answer.
+ * The pre-decode container walk. It survives the deletion of the length guard
+ * it was originally added for: it is what lets a failure report name the codec
+ * and duration without re-reading the file (95 MB in the support case), and the
+ * bytes are only readable BEFORE `decodeAudioData` detaches them.
  */
-describe('decodeAudioBlobTo16kMonoPcm: the length guard', () => {
-  /** A minimal but real mp4: `ftyp` + `moov`/`mvhd` carrying the duration. No trak, so the channel count stays unknown and the guard must assume stereo. */
+describe('decodeAudioBlobTo16kMonoPcm: what the failure path already knows', () => {
+  /** A minimal but real mp4: `ftyp` + `moov`/`mvhd` carrying the duration. */
   function mp4WithDuration(seconds: number): Blob {
     const u32 = (v: number) => [(v >>> 24) & 0xff, (v >>> 16) & 0xff, (v >>> 8) & 0xff, v & 0xff];
     const ascii = (s: string) => [...s].map((c) => c.charCodeAt(0));
@@ -320,59 +318,7 @@ describe('decodeAudioBlobTo16kMonoPcm: the length guard', () => {
     return new Blob([new Uint8Array([...box('ftyp', ascii('isom')), ...box('moov', mvhd)])]);
   }
 
-  /** Duration whose estimated stereo peak at 16 kHz equals `bytes` — derived from the constant so retuning the ceiling can't invalidate these tests. */
-  function secondsForPeak(bytes: number): number {
-    return bytes / (TARGET_SAMPLE_RATE * 4 * 3); // decoded (2 ch) + mono copy (1 ch)
-  }
-
-  it('rejects a recording whose decode would not fit, without calling the decoder at all', async () => {
-    let decodeCalled = false;
-    const deps: AudioDecodeDeps = {
-      decode: async () => {
-        decodeCalled = true;
-        throw new Error('should not be reached');
-      },
-    };
-
-    const error = await rejectionOf(
-      decodeAudioBlobTo16kMonoPcm(mp4WithDuration(secondsForPeak(MAX_DECODE_PEAK_BYTES * 1.2)), deps),
-    );
-
-    expect(error.code).toBe('AUDIO_TOO_LONG');
-    // Not calling the decoder is the point: that call is the multi-minute wait.
-    expect(decodeCalled).toBe(false);
-  });
-
-  it('names the duration and the ceiling, so the message is actionable', async () => {
-    const deps: AudioDecodeDeps = { decode: async () => { throw new Error('unreached'); } };
-
-    const error = await rejectionOf(decodeAudioBlobTo16kMonoPcm(mp4WithDuration(9611), deps));
-
-    expect(error.message).toContain('2:40:11');
-    expect(error.message).toMatch(/GB/);
-  });
-
-  it('lets a recording that fits through untouched', async () => {
-    const deps = depsFor(fakeDecoded(TARGET_SAMPLE_RATE, [new Float32Array(160)]));
-
-    const pcm = await decodeAudioBlobTo16kMonoPcm(mp4WithDuration(secondsForPeak(MAX_DECODE_PEAK_BYTES * 0.4)), deps);
-
-    expect(pcm.length).toBe(160);
-  });
-
-  it('does not guard what it cannot measure — no duration, no rejection', async () => {
-    // Our own `.webm` recordings, a WAV, anything without an mvhd: guessing a
-    // length would be worse than letting the real decode speak.
-    const deps = depsFor(fakeDecoded(TARGET_SAMPLE_RATE, [new Float32Array(160)]));
-
-    const pcm = await decodeAudioBlobTo16kMonoPcm(new Blob([new Uint8Array(64).fill(0x7a)]), deps);
-
-    expect(pcm.length).toBe(160);
-  });
-
   it('hands the already-parsed container to the diagnostics instead of re-reading the file', async () => {
-    // The file in the support case was 95 MB. Re-reading it just to build the
-    // report is waste the guard already did the work to avoid.
     const diagnose = vi.fn<AudioDecodeDiagnose>(async () => 'report');
     const deps: AudioDecodeDeps = {
       decode: async () => { throw new DOMException('Unable to decode audio data', 'EncodingError'); },
@@ -386,6 +332,22 @@ describe('decodeAudioBlobTo16kMonoPcm: the length guard', () => {
     expect(failure.container?.durationSeconds).toBeCloseTo(60, 3);
     // And the rate the estimate in the report must be computed against.
     expect(failure.decodeSampleRate).toBe(TARGET_SAMPLE_RATE);
+  });
+
+  it('no longer refuses a long recording — the length guard is gone', async () => {
+    // A 4 h file must reach the decoder. Whether the decode then succeeds is
+    // the decoder's answer to give, not a threshold's.
+    let decodeCalled = false;
+    const deps: AudioDecodeDeps = {
+      decode: async () => {
+        decodeCalled = true;
+        return fakeDecoded(TARGET_SAMPLE_RATE, [new Float32Array(160)]);
+      },
+    };
+
+    await decodeAudioBlobTo16kMonoPcm(mp4WithDuration(4 * 3600), deps);
+
+    expect(decodeCalled).toBe(true);
   });
 });
 
