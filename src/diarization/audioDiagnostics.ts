@@ -42,10 +42,12 @@
  *
  * Reached through injected structural envs, same discipline as
  * `audioDecode.ts`'s `AudioDecoderLike` and `opfsAudio.ts`'s
- * `getOpfsStorage()`: `MediaSource` and `AudioContext` don't exist in
- * Node/Vitest, so the report builder takes them as parameters and the real
- * `globalThis` lookup happens only in `collectAudioDecodeDiagnostics()` at
- * the bottom.
+ * `getOpfsStorage()`: `MediaSource` doesn't exist in Node/Vitest, so the report
+ * builder takes every fact as a parameter and the real `globalThis` lookup
+ * happens only in `collectAudioDecodeDiagnostics()` at the bottom. The
+ * `audio context:` line is the exception — it is built by `audioDecode.ts`,
+ * which owns the context routing, and passed in (see the note above
+ * `DiagnosticsEnvLike`).
  */
 
 /** What `sniffContainer` could work out from the bytes. Every field except `container`/`notes` is absent when the format doesn't carry it (or the parse gave up). */
@@ -486,39 +488,22 @@ export function formatDiagnosticsReport(input: DiagnosticsInput): string {
 // --- Real-globals Andockpunkt (manual milestone, not unit-tested) ---------
 //
 // Same shape and same reason as `audioDecode.ts`'s `createAudioContextDecoder`:
-// `MediaSource`, `AudioContext` and `navigator` are browser-only, so the
-// `globalThis` lookups live in exactly this one place and everything above is
-// reachable from Vitest through plain parameters.
+// `MediaSource` and `navigator` are browser-only, so the `globalThis` lookups
+// live in exactly this one place and everything above is reachable from Vitest
+// through plain parameters.
 
 interface DiagnosticsEnvLike extends CodecProbeEnvLike {
-  AudioContext?: new () => { sampleRate: number; state: string; close(): Promise<void> };
-  webkitAudioContext?: new () => { sampleRate: number; state: string; close(): Promise<void> };
   navigator?: { userAgent?: string };
 }
 
-/**
- * Opens a throwaway `AudioContext` purely to report its rate and state — or,
- * if that throws, reports the throw. That second outcome is the whole point:
- * a machine with no audio output device or a blocking policy fails here, and
- * without this line that failure is indistinguishable from a bad codec.
- */
-async function describeAudioContext(env: DiagnosticsEnvLike): Promise<string> {
-  const Ctor = env.AudioContext ?? env.webkitAudioContext;
-  if (!Ctor) return 'unavailable (no AudioContext constructor)';
-  let context: { sampleRate: number; state: string; close(): Promise<void> } | undefined;
-  try {
-    context = new Ctor();
-    return `${context.sampleRate} Hz, state ${context.state}`;
-  } catch (error) {
-    return `could not be opened — ${describeThrown(error)}`;
-  } finally {
-    try {
-      await context?.close();
-    } catch {
-      /* closing a context we only opened to inspect is not worth reporting */
-    }
-  }
-}
+// The `audio context:` line is NOT built here. It has to describe the context
+// that actually decodes, and the routing that picks that context lives in
+// `audioDecode.ts` (`describeDecodingContext`) — which passes the finished line
+// in as `failure.audioContext`. This module used to open a hardware
+// `AudioContext` of its own for it; that was correct while the decode used one
+// too, and became wrong the moment the decode moved to a 16 kHz
+// `OfflineAudioContext`. Do not reintroduce a second lookup here: two lines of
+// one report describing two different contexts is worse than no line.
 
 /**
  * The production diagnostics collector wired into `App.tsx`'s decode seam.
@@ -533,7 +518,14 @@ async function describeAudioContext(env: DiagnosticsEnvLike): Promise<string> {
  */
 export async function collectAudioDecodeDiagnostics(
   blob: Blob,
-  failure: { code: string; cause: unknown; container?: ContainerInfo; decodeSampleRate?: number },
+  failure: {
+    code: string;
+    cause: unknown;
+    container?: ContainerInfo;
+    decodeSampleRate?: number;
+    /** Built by `audioDecode.ts`'s `describeDecodingContext` — see the note above `DiagnosticsEnvLike`. */
+    audioContext?: string;
+  },
 ): Promise<string> {
   const env = globalThis as unknown as DiagnosticsEnvLike;
   let container = failure.container;
@@ -553,7 +545,7 @@ export async function collectAudioDecodeDiagnostics(
     fileType: blob.type,
     container,
     codecSupport: probeCodecSupport(env),
-    audioContext: await describeAudioContext(env),
+    audioContext: failure.audioContext,
     userAgent: env.navigator?.userAgent,
   });
 }

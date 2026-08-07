@@ -14,6 +14,7 @@ import {
   createAudioContextDecoder,
   createDecodingContext,
   decodeAudioBlobTo16kMonoPcm,
+  describeDecodingContext,
   MAX_DECODE_PEAK_BYTES,
   TARGET_SAMPLE_RATE,
   type AudioDecodeDeps,
@@ -477,6 +478,74 @@ describe('createDecodingContext: which context, and in which order', () => {
     }
     expect(error?.code).toBe('AUDIO_CONTEXT_FAILED');
     expect(error?.message).toContain('NotSupportedError');
+  });
+});
+
+/**
+ * The report's `audio context:` line has to describe the context that actually
+ * DECODES. It used to open a hardware `AudioContext` of its own, which since
+ * the move to a 16 kHz `OfflineAudioContext` reported a rate nothing in the
+ * decode ever used — while the cost estimate two lines below it assumed the
+ * real one. With no device available to test on, that line is the only channel
+ * left for answering "did the 16 kHz take effect?", so it has to be right.
+ */
+describe('describeDecodingContext: reports the context that decodes', () => {
+  it('reports the offline context’s rate, not the hardware one', async () => {
+    const env = {
+      OfflineAudioContext: function (_c: number, _l: number, rate: number) {
+        return { sampleRate: rate, state: 'suspended' };
+      },
+      AudioContext: function () {
+        return { sampleRate: 48000, state: 'running', close: async () => {} };
+      },
+    };
+
+    const description = await describeDecodingContext(env as never);
+
+    expect(description).toContain(String(TARGET_SAMPLE_RATE));
+    expect(description).not.toContain('48000');
+  });
+
+  it('reports the hardware rate when the offline context is unavailable', async () => {
+    const env = {
+      AudioContext: function () {
+        return { sampleRate: 44100, state: 'running', close: async () => {} };
+      },
+    };
+
+    expect(await describeDecodingContext(env as never)).toContain('44100');
+  });
+
+  it('reports why no context could be opened, which is itself the diagnosis', async () => {
+    const env = {
+      AudioContext: function () {
+        throw new DOMException('no audio device', 'NotSupportedError');
+      },
+    };
+
+    const description = await describeDecodingContext(env as never);
+
+    expect(description).toContain('NotSupportedError');
+  });
+
+  it('never throws, even with no Web Audio at all', async () => {
+    await expect(describeDecodingContext({} as never)).resolves.toContain('unavailable');
+  });
+});
+
+describe('decodeAudioBlobTo16kMonoPcm: what the diagnostics receive', () => {
+  it('hands the decoding context’s description to the collector', async () => {
+    const diagnose = vi.fn<AudioDecodeDiagnose>(async () => 'report');
+    const deps: AudioDecodeDeps = {
+      decode: async () => { throw new DOMException('Unable to decode audio data', 'EncodingError'); },
+      diagnose,
+    };
+
+    await rejectionOf(decodeAudioBlobTo16kMonoPcm(nonEmptyBlob(), deps));
+
+    // Present and non-empty; its exact content depends on the real environment,
+    // which under Vitest has no Web Audio at all.
+    expect(diagnose.mock.calls[0][1].audioContext).toBeTruthy();
   });
 });
 

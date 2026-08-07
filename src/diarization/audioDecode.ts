@@ -191,6 +191,8 @@ export type AudioDecodeDiagnose = (
     container?: ContainerInfo;
     /** The rate the decoding context runs at, so the report's cost estimate matches what actually happened. */
     decodeSampleRate?: number;
+    /** One line describing the context that decodes — see `describeDecodingContext`. Supplied here because this module owns the context routing. */
+    audioContext?: string;
   },
 ) => Promise<string>;
 
@@ -236,7 +238,13 @@ export async function decodeAudioBlobTo16kMonoPcm(blob: Blob, deps: AudioDecodeD
     let details: string | undefined;
     if (deps.diagnose) {
       try {
-        details = await deps.diagnose(blob, { code, cause, container, decodeSampleRate: TARGET_SAMPLE_RATE });
+        details = await deps.diagnose(blob, {
+          code,
+          cause,
+          container,
+          decodeSampleRate: TARGET_SAMPLE_RATE,
+          audioContext: await describeDecodingContext(),
+        });
       } catch {
         // Diagnostics are a nice-to-have; the real failure below is not.
         // Swallowing here is what guarantees this module can only ever throw
@@ -343,6 +351,10 @@ export async function decodeAudioBlobTo16kMonoPcm(blob: Blob, deps: AudioDecodeD
 
 interface DecodingContextLike {
   decodeAudioData(arrayBuffer: ArrayBuffer): Promise<DecodedAudioLike>;
+  /** Reported in the diagnostics line, so a reader can see which rate the decode actually ran at. */
+  readonly sampleRate?: number;
+  /** Same — `'suspended'` for an `OfflineAudioContext`, `'running'` for a hardware one that got started. */
+  readonly state?: string;
   /**
    * Optional on purpose: `close()` is defined on `AudioContext`, not on
    * `BaseAudioContext`. An `OfflineAudioContext` holds no hardware to release
@@ -407,6 +419,44 @@ export function createDecodingContext(env: DecodingContextEnvLike): DecodingCont
     // "unsupported or corrupt data", sending everyone off to inspect a
     // perfectly fine file.
     throw new AudioDecodeError('AUDIO_CONTEXT_FAILED', describeThrown(cause), { cause });
+  }
+}
+
+/**
+ * One line for the diagnostics report describing **the context that decodes** —
+ * opened through `createDecodingContext` above, not through a second lookup of
+ * its own.
+ *
+ * That distinction is the whole reason this lives here rather than in
+ * `audioDiagnostics.ts`. The collector used to open a hardware `AudioContext`
+ * itself, which was right while the decode used one too; since the move to a
+ * 16 kHz `OfflineAudioContext` it reported a rate the decode never touched,
+ * while the cost estimate two lines below it assumed the real one. Two lines of
+ * the same report describing different contexts, and the one a reader would
+ * check first was the wrong one.
+ *
+ * Never throws: a report is worthless if building it can fail.
+ */
+export async function describeDecodingContext(
+  env: DecodingContextEnvLike = globalThis as unknown as DecodingContextEnvLike,
+): Promise<string> {
+  let context: DecodingContextLike | undefined;
+  try {
+    context = createDecodingContext(env);
+    return `${context.sampleRate ?? 'unknown'} Hz, state ${context.state ?? 'unknown'}`;
+  } catch (error) {
+    // Both coded context failures land here, and either is itself the
+    // diagnosis: no Web Audio at all, or a machine that refused to open one.
+    const message = describeThrown(error);
+    return error instanceof AudioDecodeError && error.code === 'AUDIO_CONTEXT_UNAVAILABLE'
+      ? `unavailable — ${message}`
+      : `could not be opened — ${message}`;
+  } finally {
+    try {
+      await context?.close?.();
+    } catch {
+      /* closing a context opened only to inspect is not worth reporting */
+    }
   }
 }
 
